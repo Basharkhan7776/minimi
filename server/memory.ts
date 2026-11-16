@@ -2,10 +2,20 @@ import { generateObject, type LanguageModel } from "ai";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getDb, getSetting } from "./db";
-import { getMemory, insertMemory, listMemories, vectorSearch } from "./db/memories";
+import { listReminders } from "./db/reminders";
+import {
+  deleteMemory,
+  getMemory,
+  insertMemory,
+  listMemories,
+  listMemoriesForReminder,
+  listMemoryTexts,
+  vectorSearch,
+} from "./db/memories";
 import { searchMessages } from "./db/messages";
-import type { MemoryRecord } from "./db/types";
+import type { MemoryRecord, Reminder } from "./db/types";
 import { embedPassages, embedQuery } from "./embeddings";
+import { localDateString } from "./reminders/schedule";
 
 export interface MemoryHit {
   id: string;
@@ -40,7 +50,7 @@ const extractionSchema = z.object({
 });
 
 function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return localDateString(new Date(ms));
 }
 
 export async function saveMemories(
@@ -98,7 +108,7 @@ export async function extractMemoriesForTurn(input: {
       schema: extractionSchema,
       temperature: 0,
       system:
-        "You extract durable memory from a conversation turn. Store only information that will be useful in future conversations: stable preferences, decisions, named entities, lists, dates, commitments, and corrections. Never store greetings, filler, generic knowledge, or the assistant's own reasoning. Each memory must be self-contained and understandable without the conversation. If nothing is worth remembering, return an empty list.",
+        "You extract durable memory from a conversation turn. Store only information that will be useful in future conversations: stable preferences, decisions, named entities, lists, dates, commitments, and corrections. Never store greetings, filler, generic knowledge, or the assistant's own reasoning. Never store a reminder schedule, time, or 'remind me' commitment; those are saved on the reminder itself. Each memory must be self-contained and understandable without the conversation. If nothing is worth remembering, return an empty list.",
       prompt: `Today is ${isoDate(Date.now())}.\n\nUser message:\n${input.userText.slice(0, 4000)}\n\nAssistant reply:\n${input.assistantText.slice(0, 6000)}\n\nExtract up to 4 durable memories.`,
     });
 
@@ -111,6 +121,7 @@ export async function extractMemoriesForTurn(input: {
         messageId: input.messageId,
       })),
     );
+    dropShadowReminderMemories(listReminders({ status: "active", limit: 100 }));
   } catch (error) {
     console.error("[memory] extraction failed", error);
   }
@@ -237,12 +248,19 @@ export async function recallMemories(options: {
     .slice(0, limit);
 
   for (const hit of results) {
-    if (!hit.sessionTitle) {
+    if (!hit.id.startsWith("msg:")) {
       const memory = getMemory(hit.id);
+      if (memory) {
+        hit.kind = memory.kind;
+        if (!hit.createdAt) hit.createdAt = memory.createdAt;
+        hit.eventDate = hit.eventDate ?? memory.eventDate;
+      }
+    }
+    if (!hit.sessionTitle) {
       const session = getDb()
         .prepare("SELECT title FROM sessions WHERE id = ?")
         .get(hit.sessionId) as { title: string } | undefined;
-      hit.sessionTitle = session?.title ?? memory?.kind ?? "Memory";
+      hit.sessionTitle = session?.title ?? hit.kind ?? "Memory";
     }
   }
   return results;
@@ -335,6 +353,109 @@ export async function rebuildMemories(): Promise<number> {
     }
   }
   return count;
+}
+
+export function reminderMemoryText(reminder: Reminder): string {
+  const when = reminder.dueTime
+    ? `${reminder.dueDate} at ${reminder.dueTime}`
+    : `${reminder.dueDate}, all day`;
+  const notes = reminder.notes?.trim() ? ` ${reminder.notes.trim()}` : "";
+  const url = reminder.url ? ` ${reminder.url}` : "";
+  return `Reminder: ${reminder.title} — ${when}.${notes}${url}`.replace(/\s+/g, " ").trim();
+}
+
+function writeReminderMemory(reminder: Reminder, memoryId: string, createdAt: number, embedding: number[] | null): void {
+  const text = reminderMemoryText(reminder);
+  const record: MemoryRecord = {
+    id: memoryId,
+    sessionId: reminder.sessionId || "reminders",
+    messageId: reminder.sourceMessageId,
+    kind: "task",
+    text,
+    eventDate: reminder.dueDate,
+    createdAt,
+    reminderId: reminder.id,
+  };
+  if (embedding) {
+    insertMemory(record, embedding);
+    return;
+  }
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO memories
+      (id, session_id, message_id, kind, text, event_date, created_at, reminder_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    record.id,
+    record.sessionId,
+    record.messageId,
+    record.kind,
+    record.text,
+    record.eventDate,
+    record.createdAt,
+    record.reminderId ?? null,
+  );
+  db.prepare("DELETE FROM vec_memories WHERE memory_id = ?").run(record.id);
+}
+
+export function dropStaleReminderMemories(
+  titles: Array<string | null | undefined>,
+  keepId: string | null,
+): void {
+  const needles = [
+    ...new Set(
+      titles
+        .map((title) => title?.trim().toLowerCase() ?? "")
+        .filter((title) => title.length >= 4),
+    ),
+  ];
+  if (needles.length === 0) return;
+  for (const memory of listMemoryTexts()) {
+    if (memory.id === keepId || memory.reminderId) continue;
+    const text = memory.text.toLowerCase();
+    const mentions = needles.some((needle) => text.includes(needle));
+    if (!mentions) continue;
+    const looksLikeReminder = memory.kind === "task" || text.includes("remind");
+    if (!looksLikeReminder) continue;
+    deleteMemory(memory.id);
+  }
+}
+
+function dropShadowReminderMemories(reminders: Reminder[]): void {
+  for (const reminder of reminders) {
+    const linked = listMemoriesForReminder(reminder.id);
+    dropStaleReminderMemories(
+      [reminder.title],
+      linked[0]?.id ?? null,
+    );
+  }
+}
+
+export async function syncReminderMemory(
+  reminder: Reminder,
+  previous?: Pick<Reminder, "title"> | null,
+): Promise<void> {
+  const linked = listMemoriesForReminder(reminder.id);
+  if (reminder.status !== "active") {
+    for (const memory of linked) deleteMemory(memory.id);
+    dropStaleReminderMemories([reminder.title, previous?.title], null);
+    return;
+  }
+
+  const keep = linked[0];
+  for (const extra of linked.slice(1)) deleteMemory(extra.id);
+  const memoryId = keep?.id ?? nanoid(12);
+  let embedding: number[] | null = null;
+  if (process.env.MINIMI_SKIP_EMBED !== "1") {
+    try {
+      const [vector] = await embedPassages([reminderMemoryText(reminder)]);
+      embedding = vector ?? null;
+    } catch (error) {
+      console.error("[memory] reminder embed failed", error);
+    }
+  }
+  writeReminderMemory(reminder, memoryId, keep?.createdAt ?? Date.now(), embedding);
+  dropStaleReminderMemories([reminder.title, previous?.title], memoryId);
 }
 
 export { listMemories };

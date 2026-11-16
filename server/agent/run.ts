@@ -13,6 +13,7 @@ import { getFilesByIds } from "../db/files";
 import { extractText } from "../db/messages";
 import type { FileRecord, Session } from "../db/types";
 import { recallMemories, type MemoryHit } from "../memory";
+import { listReminders } from "../db/reminders";
 import { buildSystemPrompt } from "./prompt";
 import { resolveSessionModel, type ResolvedModel } from "./providers";
 import { createAgentTools } from "./tools";
@@ -84,10 +85,13 @@ export async function prepareAgentRun(input: {
     [] as MemoryHit[],
   );
 
-  const system = buildSystemPrompt({ memories, files });
+  const reminders = listReminders({ status: "active", limit: 12 });
+  const userName = getSetting("user.name");
+  const system = buildSystemPrompt({ memories, files, reminders, userName });
   const tools = createAgentTools({
     model: resolved.model,
     context: contextText(input.messages),
+    userText,
     sessionId: input.session.id,
     userMessageId: lastUser.id,
   });

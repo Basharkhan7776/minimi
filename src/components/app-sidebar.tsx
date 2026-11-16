@@ -173,14 +173,11 @@ export function AppSidebar({
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="gap-3 pt-2">
         <div className="flex items-center gap-2 px-1">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
-            <span className="font-semibold text-lg leading-none">m</span>
+          <div className="flex size-8 items-center justify-center rounded-lg bg-white p-1 shadow-sm">
+            <img src="/minimi.svg" alt="Minimi" className="size-full object-contain" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate font-semibold text-sm">Minimi</div>
-            <div className="truncate text-muted-foreground text-xs">
-              local-first agent
-            </div>
           </div>
         </div>
         <Button
@@ -239,23 +236,6 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="border-t">
-        <div className="flex items-center justify-between gap-2 px-1 pb-1">
-          <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
-            <span
-              className={
-                bootstrap?.embedding.state === "ready"
-                  ? "size-1.5 rounded-full bg-emerald-500"
-                  : "size-1.5 rounded-full bg-amber-500"
-              }
-            />
-            {bootstrap?.embedding.state === "ready"
-              ? "Memory ready"
-              : "Memory warming up"}
-          </div>
-          <span className="text-muted-foreground text-[11px]">
-            {bootstrap?.memory.memories ?? 0} memories
-          </span>
-        </div>
         <Button
           variant="ghost"
           className="w-full justify-start gap-2"

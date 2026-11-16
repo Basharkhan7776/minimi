@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme";
 import { Toaster, toast } from "sonner";
-import { Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -39,10 +40,14 @@ export default function App() {
   const [reminderDialogOpen, setReminderDialogOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const remindersRef = useRef<Reminder[]>([]);
+  const openSessionRef = useRef<(id: string) => void>(() => undefined);
   const loadSeq = useRef(0);
   const themeSynced = useRef(false);
 
   remindersRef.current = reminders;
+  openSessionRef.current = (id) => {
+    void selectSession(id);
+  };
 
   const refreshSessions = useCallback(async (query = "") => {
     try {
@@ -65,7 +70,7 @@ export default function App() {
 
   const refreshReminders = useCallback(async () => {
     try {
-      const result = await api.listReminders("active");
+      const result = await api.listReminders("all");
       setReminders(result.reminders);
       return result.reminders;
     } catch (error) {
@@ -105,7 +110,7 @@ export default function App() {
     async function pollNotifications() {
       try {
         const { events } = await api.pendingReminderEvents();
-        if (cancelled || events.length === 0) return;
+        if (events.length === 0) return;
         for (const event of events) {
           const reminder = remindersRef.current.find(
             (item) => item.id === event.reminderId,
@@ -115,7 +120,7 @@ export default function App() {
             ? `${formatReminderDue(reminder)} · ${nudgeBody(event)}`
             : nudgeBody(event);
           const open = () => {
-            if (event.sessionId) void selectSession(event.sessionId);
+            if (event.sessionId) openSessionRef.current(event.sessionId);
           };
           const shown = await showSystemNotification({
             title: `Minimi · ${title}`,
@@ -144,11 +149,7 @@ export default function App() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [
-    activeSessionId,
-    bootstrap,
-    refreshReminders,
-  ]);
+  }, [bootstrap, refreshReminders]);
 
   useEffect(() => {
     if (!bootstrap || themeSynced.current) return;
@@ -252,16 +253,38 @@ export default function App() {
   }
 
   async function doneReminder(reminder: Reminder) {
+    const nextStatus = reminder.status === "active" ? "done" : "active";
     try {
-      await api.updateReminder(reminder.id, { status: "done" });
+      await api.updateReminder(reminder.id, { status: nextStatus });
       setReminders((current) =>
-        current.filter((item) => item.id !== reminder.id),
+        current.map((item) =>
+          item.id === reminder.id ? { ...item, status: nextStatus } : item,
+        ),
       );
-      toast.success("Reminder done. Nudges stopped.");
+      toast.success(
+        nextStatus === "done"
+          ? "Reminder completed. Nudges stopped."
+          : "Reminder reopened.",
+      );
       void refreshReminders();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not update reminder.",
+      );
+    }
+  }
+
+  async function deleteReminder(reminder: Reminder) {
+    try {
+      await api.deleteReminder(reminder.id);
+      setReminders((current) =>
+        current.filter((item) => item.id !== reminder.id),
+      );
+      toast.success("Reminder deleted.");
+      void refreshReminders();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not delete reminder.",
       );
     }
   }
@@ -280,7 +303,7 @@ export default function App() {
     void selectSession(sessionId);
   }
 
-  function openSettings(tab = "providers") {
+  function openSettings(tab = "appearance") {
     setSettingsTab(tab);
     setSettingsOpen(true);
   }
@@ -312,7 +335,7 @@ export default function App() {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background">
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2Icon className="size-4 animate-spin" />
+          <Spinner className="size-4" />
           Starting Minimi…
         </div>
       </div>
@@ -333,7 +356,7 @@ export default function App() {
           }}
           onSelectSession={(id) => void selectSession(id)}
           onNewChat={newChat}
-          onOpenSettings={() => openSettings("providers")}
+          onOpenSettings={() => openSettings("appearance")}
           onTogglePin={(session) => void togglePin(session)}
           onRename={(session, title) => void renameSession(session, title)}
           onDelete={(session) => setPendingDelete(session)}
@@ -342,7 +365,7 @@ export default function App() {
           {loadingSession ? (
             <div className="flex h-full items-center justify-center">
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                <Loader2Icon className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 Opening conversation…
               </div>
             </div>
@@ -358,9 +381,10 @@ export default function App() {
                 void refreshSessions(search);
                 void refreshReminders();
               }}
-              onOpenSettings={() => openSettings("providers")}
+              onOpenSettings={() => openSettings("provider")}
               onOpenReminderChat={openReminderChat}
               onDoneReminder={(reminder) => void doneReminder(reminder)}
+              onDeleteReminder={(reminder) => void deleteReminder(reminder)}
               onAddReminder={addReminder}
               onEditReminder={editReminder}
             />

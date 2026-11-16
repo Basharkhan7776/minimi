@@ -10,7 +10,6 @@ import {
   LightbulbIcon,
   PinIcon,
   RefreshCwIcon,
-  Settings2Icon,
   SparklesIcon,
   PaperclipIcon,
   TriangleAlertIcon,
@@ -66,6 +65,7 @@ export function ChatPage({
   onOpenSettings,
   onOpenReminderChat,
   onDoneReminder,
+  onDeleteReminder,
   onAddReminder,
   onEditReminder,
 }: {
@@ -78,6 +78,7 @@ export function ChatPage({
   onOpenSettings: () => void;
   onOpenReminderChat: (sessionId: string) => void;
   onDoneReminder: (reminder: Reminder) => void;
+  onDeleteReminder?: (reminder: Reminder) => void;
   onAddReminder: () => void;
   onEditReminder: (reminder: Reminder) => void;
 }) {
@@ -283,7 +284,7 @@ export function ChatPage({
   );
 
   return (
-    <div className="flex h-svh min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
         <SidebarTrigger />
         <div className="flex min-w-0 items-center gap-1.5">
@@ -295,15 +296,6 @@ export function ChatPage({
           </span>
         </div>
         <div className="ms-auto flex items-center gap-1">
-          {activeProvider && (
-            <span className="hidden items-center gap-1.5 text-muted-foreground text-xs sm:flex">
-              <span className="relative flex size-1.5">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-40" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-              </span>
-              {activeProvider.name}
-            </span>
-          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -318,45 +310,37 @@ export function ChatPage({
               </span>
             )}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Settings"
-            onClick={onOpenSettings}
-          >
-            <Settings2Icon />
-          </Button>
         </div>
       </header>
 
       {messages.length === 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-10">
-            <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-foreground text-background shadow-lg/10">
-              <span className="font-semibold text-2xl leading-none">m</span>
+        <div className="min-h-0 flex-1 flex flex-col justify-center overflow-y-auto px-4 py-3 sm:py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="mx-auto my-auto flex w-full max-w-2xl flex-col items-center justify-center">
+            <div className="mb-3.5 flex size-12 sm:size-14 items-center justify-center rounded-2xl bg-white p-2 sm:p-2.5 shadow-md border border-border/40">
+              <img src="/minimi.svg" alt="Minimi" className="size-full object-contain" />
             </div>
             <h1 className="text-center font-semibold text-2xl tracking-tight sm:text-3xl">
               {greeting()}.
             </h1>
-            <p className="mt-1.5 max-w-md text-center text-muted-foreground text-sm">
+            <p className="mt-1.5 max-w-md text-center text-muted-foreground text-xs sm:text-sm">
               Ask anything. Minimi can search the live web, read pages, and
               remember what matters from your conversations.
             </p>
 
-            <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
+            <div className="mt-4 sm:mt-5 grid w-full gap-2 sm:grid-cols-2">
               {SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion.title}
                   type="button"
                   onClick={() => void handleSend(suggestion.prompt)}
-                  className="flex items-start gap-2.5 rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent/40"
+                  className="flex items-start gap-2.5 rounded-xl border bg-card p-2.5 sm:p-3 text-left transition-colors hover:bg-accent/40"
                 >
                   <suggestion.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0">
-                    <span className="block font-medium text-sm">
+                    <span className="block font-medium text-xs sm:text-sm">
                       {suggestion.title}
                     </span>
-                    <span className="mt-0.5 line-clamp-1 block text-muted-foreground text-xs">
+                    <span className="mt-0.5 line-clamp-1 block text-muted-foreground text-[11px] sm:text-xs">
                       {suggestion.prompt}
                     </span>
                   </span>
@@ -364,7 +348,7 @@ export function ChatPage({
               ))}
             </div>
 
-            <div className="mt-6 w-full">{composer}</div>
+            <div className="mt-4 sm:mt-5 w-full">{composer}</div>
           </div>
         </div>
       ) : (
@@ -423,6 +407,7 @@ export function ChatPage({
           onAddReminder();
         }}
         onDone={onDoneReminder}
+        onDelete={onDeleteReminder}
         onOpenChat={(id) => {
           setRemindersOpen(false);
           onOpenReminderChat(id);

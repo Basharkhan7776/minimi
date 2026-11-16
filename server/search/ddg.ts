@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import type { SearchResult } from "../db/types";
+import { boundedSignal } from "./signal";
 
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
@@ -66,7 +67,7 @@ export async function duckDuckGoSearch(options: {
   signal?: AbortSignal;
 }): Promise<SearchResult[]> {
   const maxResults = options.maxResults ?? 5;
-  const signal = options.signal ?? AbortSignal.timeout(12000);
+  const signal = boundedSignal(options.signal, 12000);
   const html = await requestDuckDuckGo(
     options.query,
     options.freshness,
@@ -109,7 +110,7 @@ async function liteSearch(options: {
   signal?: AbortSignal;
 }): Promise<SearchResult[]> {
   const maxResults = options.maxResults ?? 5;
-  const signal = options.signal ?? AbortSignal.timeout(12000);
+  const signal = boundedSignal(options.signal, 12000);
   const params = new URLSearchParams({ q: options.query });
   const df = freshnessParam(options.freshness);
   if (df) params.set("df", df);
@@ -150,12 +151,29 @@ async function liteSearch(options: {
   return results;
 }
 
+function tavilyDays(freshness: Freshness | undefined): number | undefined {
+  switch (freshness) {
+    case "day":
+      return 1;
+    case "week":
+      return 7;
+    case "month":
+      return 31;
+    case "year":
+      return 365;
+    default:
+      return undefined;
+  }
+}
+
 export async function tavilySearch(options: {
   query: string;
   maxResults?: number;
   apiKey: string;
+  freshness?: Freshness;
   signal?: AbortSignal;
 }): Promise<SearchResult[]> {
+  const days = tavilyDays(options.freshness);
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -165,8 +183,9 @@ export async function tavilySearch(options: {
       max_results: options.maxResults ?? 5,
       search_depth: "basic",
       include_answer: false,
+      ...(days ? { days } : {}),
     }),
-    signal: options.signal ?? AbortSignal.timeout(12000),
+    signal: boundedSignal(options.signal, 12000),
   });
   if (!response.ok) throw new Error(`Tavily returned ${response.status}`);
   const data = (await response.json()) as {
@@ -207,7 +226,7 @@ export async function braveSearch(options: {
         accept: "application/json",
         "x-subscription-token": options.apiKey,
       },
-      signal: options.signal ?? AbortSignal.timeout(12000),
+      signal: boundedSignal(options.signal, 12000),
     },
   );
   if (!response.ok) throw new Error(`Brave returned ${response.status}`);

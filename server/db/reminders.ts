@@ -296,18 +296,30 @@ export function cancelPendingEvents(reminderId: string): void {
     .run(reminderId);
 }
 
-export function fireDueEvents(
-  now = Date.now(),
-  graceMs = 30 * 60_000,
-): number {
+export function fireDueEvents(now = Date.now()): number {
   const db = getDb();
   const transaction = db.transaction(() => {
-    db.prepare(
-      `UPDATE reminder_events
-       SET status = 'skipped'
-       WHERE status = 'pending' AND scheduled_for < ?
-         AND reminder_id IN (SELECT id FROM reminders WHERE status = 'active')`,
-    ).run(now - graceMs);
+    const stale = db
+      .prepare(
+        `SELECT e.id
+         FROM reminder_events e
+         JOIN reminders r ON r.id = e.reminder_id AND r.status = 'active'
+         WHERE e.status = 'pending' AND e.kind = 'day_hour' AND e.scheduled_for <= ?
+           AND e.scheduled_for < (
+             SELECT MAX(e2.scheduled_for)
+             FROM reminder_events e2
+             WHERE e2.reminder_id = e.reminder_id
+               AND e2.status = 'pending'
+               AND e2.kind = 'day_hour'
+               AND e2.scheduled_for <= ?
+           )`,
+      )
+      .all(now, now) as Array<{ id: string }>;
+    const skip = db.prepare(
+      "UPDATE reminder_events SET status = 'skipped' WHERE id = ?",
+    );
+    for (const row of stale) skip.run(row.id);
+
     const result = db
       .prepare(
         `UPDATE reminder_events
@@ -323,7 +335,7 @@ export function fireDueEvents(
 
 export function claimPendingNotifications(
   now = Date.now(),
-  graceMs = 10 * 60_000,
+  limit = 20,
 ): ReminderEvent[] {
   const db = getDb();
   const transaction = db.transaction(() => {
@@ -333,10 +345,11 @@ export function claimPendingNotifications(
          FROM reminder_events e
          JOIN reminders r ON r.id = e.reminder_id
          WHERE e.status = 'fired' AND e.notified_at IS NULL
-           AND e.fired_at >= ? AND r.status = 'active'
-         ORDER BY e.fired_at ASC, e.scheduled_for ASC`,
+           AND r.status = 'active'
+         ORDER BY e.fired_at ASC, e.scheduled_for ASC
+         LIMIT ?`,
       )
-      .all(now - graceMs) as EventRow[];
+      .all(limit) as EventRow[];
     if (rows.length > 0) {
       const mark = db.prepare(
         "UPDATE reminder_events SET notified_at = ? WHERE id = ?",

@@ -15,7 +15,9 @@ const reminderSchema = z.object({
         .string()
         .nullable()
         .optional()
-        .describe("Local 24-hour time HH:MM, or null for an all-day reminder."),
+        .describe(
+          "Clock time as HH:MM when the user named one. Null when only a date was given, so the reminder runs all day.",
+        ),
       url: z
         .string()
         .nullable()
@@ -26,11 +28,17 @@ const reminderSchema = z.object({
     .nullable(),
 });
 
-const REMINDER_TRIGGER =
-  /\b(remind me|remember to|don'?t forget|don’t forget|set a reminder|schedule (?:a |an |the )?|follow up|i (?:will|need to|have to) (?:mail|email|call|send|pay|book|submit|finish|do|follow))\b/i;
+const EXPLICIT_REMINDER =
+  /\b(remind me|remember to|don'?t forget|don’t forget|set a reminder)\b/i;
+
+const COMMITMENT = /\b(i (?:will|need to|have to)|follow up|schedule)\b/i;
+
+const WHEN =
+  /\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|\d{1,2}(?::\d{2})?\s*(?:am|pm)|at \d{1,2})\b/i;
 
 export function shouldExtractReminder(userText: string): boolean {
-  return REMINDER_TRIGGER.test(userText);
+  if (EXPLICIT_REMINDER.test(userText)) return true;
+  return COMMITMENT.test(userText) && WHEN.test(userText);
 }
 
 export async function extractReminderForTurn(input: {
@@ -49,14 +57,14 @@ export async function extractReminderForTurn(input: {
       temperature: 0,
       abortSignal: AbortSignal.timeout(15000),
       system:
-        "You extract a single future reminder from a user message. Only create a reminder when the user explicitly commits to doing something later or asks to be reminded. Resolve relative dates using the supplied current local date and time. Use YYYY-MM-DD and 24-hour HH:MM. If no clear future commitment exists, return reminder: null. Never invent a date or time.",
+        "You extract a single future reminder from a user message. Only create a reminder when the user explicitly commits to doing something later or asks to be reminded. Resolve relative dates using the supplied current local date and time. Use YYYY-MM-DD. If the user names a clock time, set dueTime to 24-hour HH:MM so it fires once then. If they name only a date, set dueTime to null so it reminds all day. If no clear future commitment exists, return reminder: null. Never invent a date or a time.",
       prompt: `Current local date: ${localDateString(now)}\nCurrent local time: ${now.toLocaleTimeString("en-GB", { hour12: false })}\nTimezone: ${timezone}\n\nUser message:\n${input.userText.slice(0, 4000)}\n\nExtract the reminder. If a URL appears in the message, include it.`,
     });
 
     if (!object.reminder) return null;
     const url =
       object.reminder.url?.trim() || extractFirstUrl(input.userText) || null;
-    const result = createReminderFromInput({
+    const result = await createReminderFromInput({
       sessionId: input.sessionId,
       sourceMessageId: input.messageId,
       reminder: {

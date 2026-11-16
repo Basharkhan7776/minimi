@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Spinner } from "@/components/ui/spinner";
 import {
+  BellIcon,
   BrainIcon,
   ChevronDownIcon,
   FileTextIcon,
@@ -15,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { formatDate, hostnameOf } from "@/lib/format";
 import { openExternal } from "@/lib/external";
 import {
+  type CreateReminderOutput,
   type FetchUrlOutput,
   type RecallMemoryOutput,
   type ToolPart,
@@ -30,12 +33,25 @@ function statusLine(part: ToolPart, name: string): string {
     if (name === "web_search") return "Searching the web";
     if (name === "fetch_url") return "Reading page";
     if (name === "recall_memory") return "Searching memory";
+    if (name === "create_reminder") return "Saving reminder";
+    if (name === "update_reminder") return "Updating reminder";
     return "Running tool";
   }
   if (part.state === "output-error") return "Tool failed";
   if (name === "web_search") return "Searched the web";
   if (name === "fetch_url") return "Read page";
   if (name === "recall_memory") return "Recalled from memory";
+  if (name === "create_reminder" || name === "update_reminder") {
+    const output = part.output as CreateReminderOutput | undefined;
+    if (output?.ok === false) return "Could not save reminder";
+    if (output?.duplicate) return "Reminder already scheduled";
+    if (name === "update_reminder") {
+      return output?.reminder && "status" in output.reminder && output.reminder.status === "done"
+        ? "Reminder done"
+        : "Updated reminder";
+    }
+    return "Saved reminder";
+  }
   return "Used tool";
 }
 
@@ -58,6 +74,14 @@ function statusDetail(part: ToolPart, name: string): string | null {
     const count = output?.hits?.length ?? 0;
     return `${count} memor${count === 1 ? "y" : "ies"}`;
   }
+  if (name === "create_reminder" || name === "update_reminder") {
+    const output = part.output as CreateReminderOutput | undefined;
+    if (output?.ok === false) return output.error ?? "Could not save";
+    const due = output?.reminder
+      ? `${output.reminder.dueDate}${output.reminder.dueTime ? ` ${output.reminder.dueTime}` : ""}`
+      : null;
+    return due;
+  }
   return null;
 }
 
@@ -77,7 +101,9 @@ export function ToolCall({ part }: { part: ToolPart }) {
         ? FileTextIcon
         : name === "recall_memory"
           ? BrainIcon
-          : WrenchIcon;
+          : name === "create_reminder" || name === "update_reminder"
+            ? BellIcon
+            : WrenchIcon;
 
   return (
     <div className="my-2 overflow-hidden rounded-lg border bg-muted/30">
@@ -93,7 +119,7 @@ export function ToolCall({ part }: { part: ToolPart }) {
           )}
         >
           {streaming ? (
-            <Loader2Icon className="size-3.5 animate-spin" />
+            <Spinner className="size-3.5" />
           ) : failed ? (
             <TriangleAlertIcon className="size-3.5" />
           ) : (
@@ -242,6 +268,40 @@ function ToolDetails({ part, name }: { part: ToolPart; name: string }) {
         <div className="max-h-56 overflow-y-auto whitespace-pre-wrap text-muted-foreground leading-relaxed">
           {output?.text?.slice(0, 2000)}
         </div>
+      </div>
+    );
+  }
+
+  if (name === "create_reminder" || name === "update_reminder") {
+    const output = part.output as CreateReminderOutput | undefined;
+    if (output?.ok === false) {
+      return (
+        <div className="text-destructive">
+          {output.error ?? "Could not save the reminder."}
+        </div>
+      );
+    }
+    const reminder = output?.reminder;
+    return (
+      <div className="space-y-1">
+        <div className="font-medium text-foreground/90">
+          {reminder?.title ?? "Reminder"}
+        </div>
+        <div className="text-muted-foreground">
+          {reminder
+            ? `${reminder.dueDate}${reminder.dueTime ? ` ${reminder.dueTime}` : " · all day"}`
+            : (output?.note ?? "Saved")}
+          {output?.duplicate ? " · already scheduled" : ""}
+        </div>
+        {reminder?.url && (
+          <button
+            type="button"
+            className="block truncate text-left text-primary hover:underline"
+            onClick={() => void openExternal(reminder.url!)}
+          >
+            {reminder.url}
+          </button>
+        )}
       </div>
     );
   }

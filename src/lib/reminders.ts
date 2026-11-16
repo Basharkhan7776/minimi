@@ -16,7 +16,7 @@ export function formatReminderDue(reminder: Reminder): string {
     : isTomorrow(due)
       ? "Tomorrow"
       : format(due, "d MMM");
-  return reminder.dueTime ? `${day} ${reminder.dueTime}` : day;
+  return reminder.dueTime ? `${day} ${reminder.dueTime}` : `${day} · all day`;
 }
 
 export function isReminderOverdue(reminder: Reminder, now = Date.now()): boolean {
@@ -35,6 +35,16 @@ export function activeReminders(reminders: Reminder[]): Reminder[] {
     .sort((a, b) =>
       `${a.dueDate} ${a.dueTime ?? "00:00"}`.localeCompare(
         `${b.dueDate} ${b.dueTime ?? "00:00"}`,
+      ),
+    );
+}
+
+export function doneReminders(reminders: Reminder[]): Reminder[] {
+  return reminders
+    .filter((reminder) => reminder.status === "done")
+    .sort((a, b) =>
+      `${b.dueDate} ${b.dueTime ?? "00:00"}`.localeCompare(
+        `${a.dueDate} ${a.dueTime ?? "00:00"}`,
       ),
     );
 }

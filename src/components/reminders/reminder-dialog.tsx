@@ -94,8 +94,8 @@ export function ReminderDialog({
         <DialogHeader>
           <DialogTitle>{reminder ? "Edit reminder" : "New reminder"}</DialogTitle>
           <DialogDescription>
-            Timed reminders notify at the due time. All-day reminders notify
-            every 2 hours from 09:00 to 21:00.
+            A time notifies once, at that time on that date. Leave the time
+            blank to remind all day, every 2 hours from 09:00 to 21:00.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-3">
@@ -120,7 +120,7 @@ export function ReminderDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="reminder-time">Time (optional)</Label>
+              <Label htmlFor="reminder-time">Time</Label>
               <Input
                 id="reminder-time"
                 type="time"

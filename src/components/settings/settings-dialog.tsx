@@ -1,35 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme";
 import {
+  BarChart2Icon,
+  BellIcon,
   CheckCircle2Icon,
+  ClockIcon,
   DatabaseIcon,
   DownloadIcon,
-  HardDriveIcon,
+  LaptopIcon,
+  MoonIcon,
+  PaletteIcon,
+  PlugIcon,
   PlusIcon,
   RefreshCwIcon,
-  Trash2Icon,
+  SearchIcon,
+  ShieldIcon,
+  SlidersHorizontalIcon,
+  SlidersIcon,
+  SunIcon,
+  TerminalIcon,
   TriangleAlertIcon,
   UploadIcon,
+  XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
   DialogPopup,
-  DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Tabs,
-  TabsList,
-  TabsPanel,
-  TabsTab,
-} from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,11 +42,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ProviderBadge } from "@/components/provider-badge";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionPanel,
+} from "@/components/ui/accordion";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { api } from "@/lib/api";
-import { formatDate, formatRelative } from "@/lib/format";
-import { ensureNotificationPermission } from "@/lib/notifications";
+import {
+  ensureNotificationPermission,
+  showSystemNotification,
+} from "@/lib/notifications";
+import { cn } from "@/lib/utils";
 import type {
   EmbeddingStatus,
   MemoryRecord,
@@ -77,17 +86,94 @@ interface MemoryPayload {
   memories: MemoryRecord[];
 }
 
+interface NavItem {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  keywords: string;
+}
+
+const SETTINGS_TABS: NavItem[] = [
+  {
+    id: "appearance",
+    label: "Appearance",
+    icon: PaletteIcon,
+    keywords: "appearance theme dark light system colors display style",
+  },
+  {
+    id: "behavior",
+    label: "Behavior",
+    icon: SlidersHorizontalIcon,
+    keywords: "behavior agent tool steps auto title thinking execution prompt reasoning",
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    icon: BellIcon,
+    keywords: "notifications alerts reminders nudges system sounds permissions",
+  },
+  {
+    id: "provider",
+    label: "Provider",
+    icon: SlidersIcon,
+    keywords: "provider providers models openai anthropic google gemini openrouter ollama api keys",
+  },
+  {
+    id: "connect-apps",
+    label: "Connect Apps",
+    icon: PlugIcon,
+    keywords: "connect apps integrations web search duckduckgo brave tavily engine internet",
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: TerminalIcon,
+    keywords: "skills tools web_search fetch_url recall_memory create_reminder capabilities",
+  },
+  {
+    id: "automations",
+    label: "Automations",
+    icon: ClockIcon,
+    keywords: "automations reminders scheduler cron engine background tick second brain",
+  },
+  {
+    id: "data-controls",
+    label: "Data Controls",
+    icon: ShieldIcon,
+    keywords: "data controls export import backup clear delete sqlite privacy local reset",
+  },
+  {
+    id: "usage",
+    label: "Usage",
+    icon: BarChart2Icon,
+    keywords: "usage metrics stats messages sessions memories embeddings dimension storage",
+  },
+];
+
+function normalizeTab(tab?: string): string {
+  if (!tab) return "appearance";
+  const lower = tab.toLowerCase();
+  if (lower === "account") return "appearance";
+  if (lower === "providers" || lower === "provider" || lower === "customize") return "provider";
+  if (lower === "memory") return "usage";
+  if (lower === "general") return "behavior";
+  if (lower === "data") return "data-controls";
+  return lower;
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
   onChanged,
-  initialTab = "providers",
+  initialTab = "appearance",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
   initialTab?: string;
 }) {
+  const [activeTab, setActiveTab] = useState(() => normalizeTab(initialTab));
+  const [searchQuery, setSearchQuery] = useState("");
   const [providers, setProviders] = useState<PublicProvider[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [memory, setMemory] = useState<MemoryPayload | null>(null);
@@ -100,6 +186,10 @@ export function SettingsDialog({
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(normalizeTab(initialTab));
+  }, [initialTab]);
 
   async function load() {
     setLoading(true);
@@ -129,6 +219,7 @@ export function SettingsDialog({
     try {
       const result = await api.updateSettings({ [key]: value });
       setSettings(result.settings);
+      onChanged();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not save setting.",
@@ -183,11 +274,9 @@ export function SettingsDialog({
 
   async function clearMemory() {
     try {
-      const result = await api.clearMemory();
-      setMemory((current) =>
-        current ? { ...current, stats: result.stats, memories: [] } : current,
-      );
-      toast.success("Memory cleared.");
+      await api.clearMemory();
+      toast.success("Memories cleared.");
+      await load();
       onChanged();
     } catch (error) {
       toast.error(
@@ -227,396 +316,731 @@ export function SettingsDialog({
     }
   }
 
+  const filteredTabs = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return SETTINGS_TABS;
+    return SETTINGS_TABS.filter(
+      (tab) => tab.label.toLowerCase().includes(q) || tab.keywords.includes(q),
+    );
+  }, [searchQuery]);
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogPopup className="max-h-[88vh] w-full max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
-            <DialogDescription>
-              Providers, memory and local data. Everything stays on this
-              machine.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="min-h-0 p-0">
-            <Tabs defaultValue={initialTab} className="min-h-0">
-              <div className="border-b px-6 pb-2">
-                <TabsList>
-                  <TabsTab value="providers">Providers</TabsTab>
-                  <TabsTab value="memory">Memory</TabsTab>
-                  <TabsTab value="general">General</TabsTab>
-                  <TabsTab value="data">Data</TabsTab>
-                </TabsList>
-              </div>
+        <DialogPopup
+          showCloseButton={false}
+          className="flex h-[660px] max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white p-0 text-foreground shadow-2xl md:flex-row dark:border-white/[0.08] dark:bg-[#161618]"
+        >
+          {/* Left Sidebar */}
+          <div className="flex w-full shrink-0 flex-col border-b border-neutral-200 bg-neutral-50/80 p-3 md:w-60 md:border-r md:border-b-0 dark:border-white/[0.06] dark:bg-[#111113]">
+            {/* Search Input */}
+            <div className="relative mb-2">
+              <SearchIcon className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search"
+                className="h-8 w-full rounded-lg border border-neutral-200 bg-white ps-8 pe-3 text-xs text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-neutral-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:focus:border-white/[0.2] dark:focus:bg-white/[0.07]"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              )}
+            </div>
 
-              <TabsPanel value="providers" className="space-y-3 px-6 pb-6">
-                {loading && providers.length === 0 ? (
-                  <div className="py-10 text-center text-muted-foreground text-sm">
-                    Loading providers…
-                  </div>
-                ) : (
-                  providers.map((provider) => (
-                    <ProviderCard
-                      key={provider.id}
-                      provider={provider}
-                      onSaved={() => {
-                        void load();
-                        onChanged();
+            {/* Navigation List */}
+            <div className="flex flex-1 flex-row gap-0.5 overflow-x-auto overflow-y-auto pb-1 md:flex-col md:pb-0">
+              {filteredTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors md:text-[13px]",
+                      isActive
+                        ? "bg-neutral-200 text-neutral-900 shadow-xs dark:bg-[#25252a] dark:text-white"
+                        : "text-neutral-600 hover:bg-neutral-200/60 hover:text-neutral-900 dark:text-[#8e8e96] dark:hover:bg-white/[0.04] dark:hover:text-[#d4d4d8]",
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        "size-4 shrink-0",
+                        isActive
+                          ? "text-neutral-900 dark:text-white"
+                          : "text-neutral-500 dark:text-[#8e8e96]",
+                      )}
+                    />
+                    <span className="truncate">{tab.label}</span>
+                  </button>
+                );
+              })}
+
+              {filteredTabs.length === 0 && (
+                <div className="py-6 text-center text-xs text-muted-foreground">
+                  No matching settings
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Main Content */}
+          <div className="relative flex flex-1 flex-col min-w-0 bg-white dark:bg-[#17171a] overflow-hidden">
+            {/* Top Close Button */}
+            <DialogClose
+              aria-label="Close"
+              className="absolute end-4 top-4 z-20 text-neutral-400 hover:text-neutral-900 dark:text-[#8e8e96] dark:hover:text-white"
+              render={
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 rounded-lg hover:bg-neutral-100 dark:hover:bg-white/[0.08]"
+                />
+              }
+            >
+              <XIcon className="size-4" />
+            </DialogClose>
+
+            {/* Scrollable Tab Content */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-7">
+              {/* TAB: APPEARANCE */}
+              {activeTab === "appearance" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Appearance
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Theme
+                    </div>
+                    <ThemeSetting
+                      value={settings["app.theme"] ?? "system"}
+                      onChange={(value) => {
+                        setSettings((cur) => ({ ...cur, "app.theme": value }));
+                        void saveSetting("app.theme", value);
                       }}
                     />
-                  ))
-                )}
+                  </div>
+                </div>
+              )}
 
-                <div className="rounded-xl border border-dashed p-4">
+              {/* TAB: BEHAVIOR */}
+              {activeTab === "behavior" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Behavior
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Agent Execution
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Maximum tool steps
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Upper bound on sequential tool calls (search, read,
+                            memory, reminder) per turn.
+                          </p>
+                        </div>
+                        <NumberSetting
+                          value={settings["chat.maxSteps"] ?? "8"}
+                          min={1}
+                          max={20}
+                          onCommit={(v) => void saveSetting("chat.maxSteps", v)}
+                        />
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Automatic chat titling
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Summarize conversation titles automatically in the
+                            background.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings["chat.autoTitle"] !== "0"}
+                          onCheckedChange={(checked) =>
+                            void saveSetting(
+                              "chat.autoTitle",
+                              checked ? "1" : "0",
+                            )
+                          }
+                        />
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Automatic memory extraction
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Extract facts, preferences, and commitments after
+                            each turn.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings["memory.autoExtract"] !== "0"}
+                          onCheckedChange={(checked) =>
+                            void saveSetting(
+                              "memory.autoExtract",
+                              checked ? "1" : "0",
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: NOTIFICATIONS */}
+              {activeTab === "notifications" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Notifications
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Alerts & Reminders
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Desktop notifications
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Trigger system alerts when scheduled reminders become
+                            due.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings["notifications.enabled"] !== "0"}
+                          onCheckedChange={async (checked) => {
+                            if (checked) {
+                              const granted =
+                                await ensureNotificationPermission();
+                              if (!granted) {
+                                toast.error(
+                                  "Notifications are blocked in this browser or system.",
+                                );
+                                return;
+                              }
+                            }
+                            setSettings((cur) => ({
+                              ...cur,
+                              "notifications.enabled": checked ? "1" : "0",
+                            }));
+                            void saveSetting(
+                              "notifications.enabled",
+                              checked ? "1" : "0",
+                            );
+                          }}
+                        />
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Test notification
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Send a test alert to verify notification delivery.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={async () => {
+                            const granted =
+                              await ensureNotificationPermission();
+                            if (granted) {
+                              await showSystemNotification({
+                                title: "Minimi Notification",
+                                body: "Desktop notifications are working properly!",
+                              });
+                              toast.success("Test notification sent.");
+                            } else {
+                              toast.error("Notification permission denied.");
+                            }
+                          }}
+                        >
+                          Send Test
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: PROVIDER */}
+              {activeTab === "provider" && (
+                <div className="space-y-6">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-sm">
-                        Add OpenAI-compatible provider
-                      </div>
-                      <p className="text-muted-foreground text-xs">
-                        Point Minimi at LM Studio, vLLM, or another local
-                        gateway.
-                      </p>
-                    </div>
+                    <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                      Provider
+                    </h2>
                     <Button
+                      size="sm"
                       variant="outline"
-                      size="sm"
-                      onClick={() => setAdding((value) => !value)}
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => setAdding((val) => !val)}
                     >
-                      <PlusIcon />
-                      {adding ? "Close" : "Add"}
+                      <PlusIcon className="size-3.5" />
+                      Add custom provider
                     </Button>
                   </div>
-                  {adding && (
-                    <AddProviderForm
-                      onCreated={() => {
-                        setAdding(false);
-                        void load();
-                        onChanged();
-                      }}
-                    />
-                  )}
-                </div>
-              </TabsPanel>
 
-              <TabsPanel value="memory" className="space-y-4 px-6 pb-6">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <Stat
-                    label="Memories"
-                    value={memory?.stats.memories ?? 0}
-                  />
-                  <Stat
-                    label="Messages"
-                    value={memory?.stats.messages ?? 0}
-                  />
-                  <Stat
-                    label="Embedding"
-                    value={memory?.embedding.state ?? "loading"}
-                  />
-                  <Stat
-                    label="Dimensions"
-                    value={memory?.embedding.dimension ?? 384}
-                  />
-                </div>
-
-                <div className="rounded-xl border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="font-medium text-sm">
-                        Long-term memory
-                      </div>
-                      <p className="text-muted-foreground text-xs">
-                        Extract durable facts and preferences from chats and
-                        recall them with hybrid vector + keyword search.
-                      </p>
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Configured Providers
                     </div>
-                    <Switch
-                      checked={settings["memory.enabled"] !== "0"}
-                      onCheckedChange={(checked) =>
-                        void saveSetting("memory.enabled", checked ? "1" : "0")
-                      }
-                    />
-                  </div>
-                  <div className="mt-3 flex items-start justify-between gap-4 border-t pt-3">
-                    <div>
-                      <div className="font-medium text-sm">
-                        Extract automatically
-                      </div>
-                      <p className="text-muted-foreground text-xs">
-                        Runs a small extraction pass after each assistant reply.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={settings["memory.autoExtract"] !== "0"}
-                      onCheckedChange={(checked) =>
-                        void saveSetting(
-                          "memory.autoExtract",
-                          checked ? "1" : "0",
-                        )
-                      }
-                    />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={rebuilding}
-                      onClick={() => void rebuildMemory()}
-                    >
-                      <RefreshCwIcon
-                        className={rebuilding ? "animate-spin" : undefined}
-                      />
-                      Rebuild from history
-                    </Button>
-                    <Button
-                      variant="destructive-outline"
-                      size="sm"
-                      onClick={() => setClearMemoryOpen(true)}
-                    >
-                      <Trash2Icon />
-                      Clear memory
-                    </Button>
-                    <span className="text-muted-foreground text-xs">
-                      {memory?.embedding.model ?? "bge-small-en-v1.5"}
-                    </span>
-                  </div>
-                </div>
 
-                <div>
-                  <div className="mb-2 font-medium text-muted-foreground text-xs">
-                    Recent memories
-                  </div>
-                  <div className="space-y-1.5">
-                    {(memory?.memories ?? []).slice(0, 10).map((record) => (
-                      <div
-                        key={record.id}
-                        className="rounded-lg border bg-card p-2.5"
-                      >
-                        <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                          <span className="rounded-full bg-muted px-1.5 py-0.5">
-                            {record.kind}
-                          </span>
-                          {record.eventDate
-                            ? formatDate(record.eventDate)
-                            : formatRelative(record.createdAt)}
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 dark:border-white/[0.08] dark:bg-[#1e1e22]/90">
+                      <Accordion multiple className="w-full">
+                        {providers.map((provider) => (
+                          <ProviderAccordionItem
+                            key={provider.id}
+                            provider={provider}
+                            onSaved={() => {
+                              void load();
+                              onChanged();
+                            }}
+                          />
+                        ))}
+                      </Accordion>
+                    </div>
+
+                    {adding && (
+                      <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50/50 p-4 dark:border-white/[0.08] dark:bg-[#1e1e22]/90">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-medium text-sm text-neutral-900 dark:text-white">
+                            New OpenAI-compatible provider
+                          </h3>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            onClick={() => setAdding(false)}
+                          >
+                            <XIcon className="size-3.5" />
+                          </Button>
                         </div>
-                        <div className="line-clamp-2 text-sm leading-relaxed">
-                          {record.text}
-                        </div>
-                      </div>
-                    ))}
-                    {(!memory?.memories || memory.memories.length === 0) && (
-                      <div className="rounded-lg border border-dashed py-8 text-center text-muted-foreground text-xs">
-                        No memories yet. Chat normally and Minimi will start
-                        remembering what matters.
+                        <AddProviderForm
+                          onCreated={() => {
+                            setAdding(false);
+                            void load();
+                            onChanged();
+                          }}
+                        />
                       </div>
                     )}
                   </div>
                 </div>
-              </TabsPanel>
+              )}
 
-              <TabsPanel value="general" className="space-y-4 px-6 pb-6">
-                <ThemeSetting
-                  value={settings["app.theme"] ?? "system"}
-                  onChange={(value) => {
-                    setSettings((current) => ({
-                      ...current,
-                      "app.theme": value,
-                    }));
-                    void saveSetting("app.theme", value);
-                  }}
-                />
+              {/* TAB: CONNECT APPS (Web Search) */}
+              {activeTab === "connect-apps" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Connect Apps
+                  </h2>
 
-                <div className="rounded-xl border p-4">
-                  <div className="font-medium text-sm">Web search</div>
-                  <p className="mb-3 text-muted-foreground text-xs">
-                    DuckDuckGo works without a key. Tavily and Brave use
-                    BRAVE_API_KEY / TAVILY_API_KEY from the server environment.
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label>Provider</Label>
-                      <Select
-                        value={settings["search.provider"] ?? "duckduckgo"}
-                        onValueChange={(value) =>
-                          void saveSetting("search.provider", String(value))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectPopup>
-                          <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
-                          <SelectItem value="tavily">Tavily</SelectItem>
-                          <SelectItem value="brave">Brave Search</SelectItem>
-                        </SelectPopup>
-                      </Select>
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Search Engines & Live Web
                     </div>
-                    <NumberSetting
-                      label="Results per search"
-                      value={settings["search.maxResults"] ?? "5"}
-                      min={1}
-                      max={10}
-                      onCommit={(value) =>
-                        void saveSetting("search.maxResults", value)
-                      }
-                    />
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Search provider
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            DuckDuckGo works with zero keys. Tavily and Brave
+                            support optional keys in .env.
+                          </p>
+                        </div>
+                        <Select
+                          value={settings["search.provider"] ?? "duckduckgo"}
+                          onValueChange={(val) =>
+                            void saveSetting("search.provider", String(val))
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-36 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectPopup>
+                            <SelectItem value="duckduckgo">
+                              DuckDuckGo (Free)
+                            </SelectItem>
+                            <SelectItem value="tavily">Tavily</SelectItem>
+                            <SelectItem value="brave">Brave Search</SelectItem>
+                          </SelectPopup>
+                        </Select>
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Results per search
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Number of sources returned per web search query.
+                          </p>
+                        </div>
+                        <NumberSetting
+                          value={settings["search.maxResults"] ?? "5"}
+                          min={1}
+                          max={10}
+                          onCommit={(v) =>
+                            void saveSetting("search.maxResults", v)
+                          }
+                        />
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Cache TTL (minutes)
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            How long search responses are cached before refreshing.
+                          </p>
+                        </div>
+                        <NumberSetting
+                          value={settings["search.cacheTtlMinutes"] ?? "180"}
+                          min={10}
+                          max={1440}
+                          onCommit={(v) =>
+                            void saveSetting("search.cacheTtlMinutes", v)
+                          }
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="rounded-xl border p-4">
-                  <div className="font-medium text-sm">Agent behaviour</div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <NumberSetting
-                      label="Maximum tool steps"
-                      value={settings["chat.maxSteps"] ?? "8"}
-                      min={1}
-                      max={20}
-                      onCommit={(value) =>
-                        void saveSetting("chat.maxSteps", value)
-                      }
-                    />
-                    <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-                      <div>
-                        <div className="font-medium text-sm">Auto title</div>
-                        <p className="text-muted-foreground text-xs">
-                          Name chats automatically. Manual names stay fixed.
-                        </p>
+              {/* TAB: SKILLS (Agent Capabilities) */}
+              {activeTab === "skills" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Skills
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Active Agent Tools
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      {[
+                        {
+                          name: "web_search",
+                          desc: "Live search with query expansion, page reading, date parsing, and citation generation.",
+                          status: "active",
+                        },
+                        {
+                          name: "fetch_url",
+                          desc: "Direct URL reader with SSRF blocking and Mozilla Readability content extraction.",
+                          status: "active",
+                        },
+                        {
+                          name: "recall_memory",
+                          desc: "Hybrid dense-vector (sqlite-vec) and lexical (FTS5) past-conversation retrieval.",
+                          status: "active",
+                        },
+                        {
+                          name: "create_reminder",
+                          desc: "Natural language schedule parser that creates timed and all-day Second Brain tasks.",
+                          status: "active",
+                        },
+                        {
+                          name: "update_reminder",
+                          desc: "Modifies, reschedules, or marks active reminders completed from natural language.",
+                          status: "active",
+                        },
+                      ].map((skill) => (
+                        <div
+                          key={skill.name}
+                          className="p-4 flex items-center justify-between gap-4"
+                        >
+                          <div>
+                            <div className="text-sm font-mono font-medium text-neutral-900 dark:text-white">
+                              {skill.name}
+                            </div>
+                            <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                              {skill.desc}
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                            Ready
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: AUTOMATIONS (Second Brain Reminders) */}
+              {activeTab === "automations" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Automations
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Second Brain Engine
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Scheduler status
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Runs every 30 seconds to deliver timed nudges and
+                            bi-hourly all-day reminders.
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          Active (30s tick)
+                        </span>
                       </div>
-                      <Switch
-                        checked={settings["chat.autoTitle"] !== "0"}
-                        onCheckedChange={(checked) =>
-                          void saveSetting(
-                            "chat.autoTitle",
-                            checked ? "1" : "0",
-                          )
-                        }
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            All-day nudge window
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            All-day tasks notify every 2 hours between 09:00 and
+                            21:00 local time.
+                          </p>
+                        </div>
+                        <span className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                          09:00 - 21:00
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: DATA CONTROLS */}
+              {activeTab === "data-controls" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Data Controls
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Backup & Migration
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50/50 divide-y divide-neutral-200 dark:border-white/[0.08] dark:bg-[#1e1e22]/90 dark:divide-white/[0.06]">
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <DatabaseIcon className="mt-0.5 size-4 text-neutral-500 dark:text-[#8e8e96]" />
+                          <div>
+                            <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                              Export data
+                            </div>
+                            <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                              Download conversations, messages, memories, and
+                              reminders as JSON.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={exporting}
+                          onClick={() => void handleExport()}
+                          className="h-8 text-xs"
+                        >
+                          <DownloadIcon className="size-3.5 me-1" />
+                          Export
+                        </Button>
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <UploadIcon className="mt-0.5 size-4 text-neutral-500 dark:text-[#8e8e96]" />
+                          <div>
+                            <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                              Import backup
+                            </div>
+                            <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                              Merge a previously exported JSON file.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={importing}
+                          onClick={() => importRef.current?.click()}
+                          className="h-8 text-xs"
+                        >
+                          <UploadIcon className="size-3.5 me-1" />
+                          Import
+                        </Button>
+                        <input
+                          ref={importRef}
+                          type="file"
+                          accept="application/json,.json"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = "";
+                            if (f) void handleImportFile(f);
+                          }}
+                        />
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <RefreshCwIcon className="mt-0.5 size-4 text-neutral-500 dark:text-[#8e8e96]" />
+                          <div>
+                            <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                              Rebuild memories
+                            </div>
+                            <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                              Re-extract and re-embed all conversations from
+                              history.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={rebuilding}
+                          onClick={() => void rebuildMemory()}
+                          className="h-8 text-xs"
+                        >
+                          <RefreshCwIcon
+                            className={cn(
+                              "size-3.5 me-1",
+                              rebuilding && "animate-spin",
+                            )}
+                          />
+                          Rebuild
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-destructive">
+                      Danger Zone
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-destructive/20 bg-destructive/5 divide-y divide-destructive/10">
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Clear extracted memories
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Deletes all durable facts. Past messages remain.
+                          </p>
+                        </div>
+                        <Button
+                          variant="destructive-outline"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => setClearMemoryOpen(true)}
+                        >
+                          Clear Memory
+                        </Button>
+                      </div>
+
+                      <div className="p-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                            Clear all local data
+                          </div>
+                          <p className="text-xs text-neutral-500 dark:text-[#8e8e96]">
+                            Permanently wipes database, files, and chat history.
+                          </p>
+                        </div>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => setClearDataOpen(true)}
+                        >
+                          Delete All
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: USAGE */}
+              {activeTab === "usage" && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold text-neutral-900 dark:text-white tracking-tight">
+                    Usage
+                  </h2>
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-[#8e8e96]">
+                      Metrics & Storage
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Stat
+                        label="Memories"
+                        value={memory?.stats.memories ?? 0}
+                      />
+                      <Stat
+                        label="Messages"
+                        value={memory?.stats.messages ?? 0}
+                      />
+                      <Stat
+                        label="Embeddings"
+                        value={memory?.embedding.state ?? "ready"}
+                      />
+                      <Stat
+                        label="Dimension"
+                        value={memory?.embedding.dimension ?? 384}
                       />
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center justify-between gap-3 rounded-xl border p-4">
-                  <div>
-                    <div className="font-medium text-sm">
-                      Desktop notifications
+                  <div className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-4 dark:border-white/[0.08] dark:bg-[#1e1e22]/90">
+                    <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                      Local Embedding Model
                     </div>
-                    <p className="text-muted-foreground text-xs">
-                      Show system notifications when a reminder fires. The
-                      Notification drawer always updates.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings["notifications.enabled"] !== "0"}
-                    onCheckedChange={async (checked) => {
-                      if (checked) {
-                        const granted = await ensureNotificationPermission();
-                        if (!granted) {
-                          toast.error(
-                            "Notifications are blocked in this browser or system.",
-                          );
-                          return;
-                        }
-                      }
-                      setSettings((current) => ({
-                        ...current,
-                        "notifications.enabled": checked ? "1" : "0",
-                      }));
-                      void saveSetting(
-                        "notifications.enabled",
-                        checked ? "1" : "0",
-                      );
-                    }}
-                  />
-                </div>
-              </TabsPanel>
-
-              <TabsPanel value="data" className="space-y-3 px-6 pb-6">
-                <div className="rounded-xl border p-4">
-                  <div className="flex items-start gap-3">
-                    <DatabaseIcon className="mt-0.5 size-4 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm">Export</div>
-                      <p className="text-muted-foreground text-xs">
-                        Download conversations, messages, memories, reminders,
-                        and provider metadata as JSON. API keys are never included.
-                      </p>
+                    <div className="mt-1 text-xs text-neutral-500 dark:text-[#8e8e96]">
+                      {memory?.embedding.model ?? "bge-small-en-v1.5"} (384-dim,
+                      fastembed ONNX runtime, zero cloud dependency)
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={exporting}
-                      onClick={() => void handleExport()}
-                    >
-                      <DownloadIcon />
-                      Export
-                    </Button>
                   </div>
                 </div>
-
-                <div className="rounded-xl border p-4">
-                  <div className="flex items-start gap-3">
-                    <UploadIcon className="mt-0.5 size-4 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm">Import</div>
-                      <p className="text-muted-foreground text-xs">
-                        Merge a previous Minimi export. Existing IDs are skipped.
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={importing}
-                      onClick={() => importRef.current?.click()}
-                    >
-                      <UploadIcon />
-                      Import
-                    </Button>
-                    <input
-                      ref={importRef}
-                      type="file"
-                      accept="application/json,.json"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (file) void handleImportFile(file);
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-destructive/30 p-4">
-                  <div className="flex items-start gap-3">
-                    <HardDriveIcon className="mt-0.5 size-4 text-destructive" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm">Clear local data</div>
-                      <p className="text-muted-foreground text-xs">
-                        Delete every conversation, message, memory, reminder, and
-                        uploaded file from this machine.
-                      </p>
-                    </div>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setClearDataOpen(true)}
-                    >
-                      <Trash2Icon />
-                      Clear
-                    </Button>
-                  </div>
-                </div>
-
-                <p className="text-muted-foreground text-[11px]">
-                  Data is stored in the local SQLite database managed by the
-                  Minimi server. No telemetry is sent anywhere.
-                </p>
-              </TabsPanel>
-            </Tabs>
-          </DialogPanel>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Done</DialogClose>
-          </DialogFooter>
+              )}
+            </div>
+          </div>
         </DialogPopup>
       </Dialog>
 
@@ -629,6 +1053,7 @@ export function SettingsDialog({
         destructive
         onConfirm={() => void clearMemory()}
       />
+
       <ConfirmDialog
         open={clearDataOpen}
         onOpenChange={setClearDataOpen}
@@ -638,10 +1063,11 @@ export function SettingsDialog({
         destructive
         onConfirm={() => void clearData()}
       />
+
       <ConfirmDialog
         open={pendingImport !== null}
-        onOpenChange={(value) => {
-          if (!value) setPendingImport(null);
+        onOpenChange={(v) => {
+          if (!v) setPendingImport(null);
         }}
         title="Import this export?"
         description="Conversations and messages are merged into your local database. Existing IDs are skipped."
@@ -654,11 +1080,11 @@ export function SettingsDialog({
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-2">
-      <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-3 dark:border-white/[0.08] dark:bg-[#1e1e22]/90">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500 dark:text-[#8e8e96]">
         {label}
       </div>
-      <div className="mt-0.5 truncate font-semibold text-lg tabular-nums">
+      <div className="mt-0.5 truncate text-lg font-semibold tabular-nums text-neutral-900 dark:text-white">
         {value}
       </div>
     </div>
@@ -666,20 +1092,19 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function NumberSetting({
-  label,
   value,
   min,
   max,
   onCommit,
 }: {
-  label: string;
   value: string;
   min: number;
   max: number;
-  onCommit: (value: number) => void;
+  onCommit: (val: number) => void;
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
+
   function commit() {
     const parsed = Number(draft);
     if (!Number.isFinite(parsed)) {
@@ -690,23 +1115,20 @@ function NumberSetting({
     setDraft(String(clamped));
     if (String(clamped) !== value) onCommit(clamped);
   }
+
   return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <Input
-        type="number"
-        min={min}
-        max={max}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
-          }
-        }}
-      />
-    </div>
+    <Input
+      type="number"
+      min={min}
+      max={max}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      className="h-8 w-20 text-center text-xs"
+    />
   );
 }
 
@@ -715,36 +1137,46 @@ function ThemeSetting({
   onChange,
 }: {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (val: string) => void;
 }) {
   const { setTheme } = useTheme();
+
   return (
-    <div className="rounded-xl border p-4">
-      <div className="font-medium text-sm">Appearance</div>
-      <p className="mb-3 text-muted-foreground text-xs">
-        Choose how Minimi looks on this device.
-      </p>
-      <div className="flex gap-2">
-        {(["system", "light", "dark"] as const).map((theme) => (
-          <Button
-            key={theme}
-            size="sm"
-            variant={value === theme ? "default" : "outline"}
-            onClick={() => {
-              setTheme(theme);
-              onChange(theme);
-            }}
-            className="capitalize"
-          >
-            {theme}
-          </Button>
-        ))}
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-4 dark:border-white/[0.08] dark:bg-[#1e1e22]/90">
+      <div className="grid grid-cols-3 gap-2.5">
+        {[
+          { id: "system", label: "System", icon: LaptopIcon },
+          { id: "light", label: "Light", icon: SunIcon },
+          { id: "dark", label: "Dark", icon: MoonIcon },
+        ].map((item) => {
+          const Icon = item.icon;
+          const isCurrent = value === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setTheme(item.id as "system" | "light" | "dark");
+                onChange(item.id);
+              }}
+              className={cn(
+                "flex flex-col items-center gap-2 rounded-xl border p-4 text-center transition-all cursor-pointer",
+                isCurrent
+                  ? "border-neutral-900 bg-neutral-200/80 text-neutral-900 shadow-xs dark:border-white/[0.3] dark:bg-white/[0.08] dark:text-white"
+                  : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:border-white/[0.06] dark:bg-white/[0.02] dark:text-[#8e8e96] dark:hover:bg-white/[0.05] dark:hover:text-white",
+              )}
+            >
+              <Icon className="size-5" />
+              <span className="text-xs font-medium">{item.label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ProviderCard({
+function ProviderAccordionItem({
   provider,
   onSaved,
 }: {
@@ -789,7 +1221,10 @@ function ProviderCard({
     setTesting(true);
     setResult(null);
     try {
-      const response = await api.testProvider(provider.id, model.trim() || undefined);
+      const response = await api.testProvider(
+        provider.id,
+        model.trim() || undefined,
+      );
       setResult({
         ok: response.ok,
         message: response.ok
@@ -807,100 +1242,120 @@ function ProviderCard({
   }
 
   return (
-    <div className="rounded-xl border p-4">
-      <div className="flex items-start gap-3">
-        <ProviderBadge provider={provider} size={34} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-medium text-sm">{provider.name}</span>
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {provider.type}
+    <AccordionItem
+      value={provider.id}
+      className="border-b border-neutral-200 dark:border-white/[0.06] last:border-b-0"
+    >
+      <div className="flex items-center justify-between gap-3 pe-4 transition-colors hover:bg-neutral-100/50 dark:hover:bg-white/[0.02]">
+        <AccordionTrigger className="flex-1 min-w-0 py-3.5 ps-4 pe-2 hover:no-underline">
+          <div className="flex items-center gap-2.5 truncate">
+            <span className="font-medium text-sm text-neutral-900 dark:text-white truncate">
+              {provider.name}
             </span>
             {provider.hasApiKey && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 shrink-0">
                 <CheckCircle2Icon className="size-2.5" />
-                key saved
+                saved
+              </span>
+            )}
+            {provider.defaultModel && (
+              <span className="hidden truncate font-mono text-xs text-neutral-500 dark:text-[#8e8e96] sm:inline max-w-[200px]">
+                {provider.defaultModel}
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            {PROVIDER_HELP[provider.type]}
-          </p>
-        </div>
-        <Switch
-          checked={enabled}
-          onCheckedChange={(checked) => {
-            setEnabled(checked);
-            void save(checked);
-          }}
-        />
-      </div>
+        </AccordionTrigger>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label>API key</Label>
-          <Input
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={
-              provider.apiKeyPreview
-                ? `Saved ${provider.apiKeyPreview}`
-                : provider.type === "ollama"
-                  ? "Not required for Ollama"
-                  : "Paste API key"
-            }
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Default model</Label>
-          <Input
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="Model id"
-          />
-        </div>
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label>Base URL</Label>
-          <Input
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder={PROVIDER_BASE_HINT[provider.type]}
+        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+          <Switch
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              void save(checked);
+            }}
           />
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={saving} onClick={() => void save()}>
-          Save
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={testing || saving}
-          onClick={() => void test()}
-        >
-          {testing ? "Testing…" : "Test connection"}
-        </Button>
-        {result && (
-          <span
-            className={
-              result.ok
-                ? "text-emerald-600 text-xs dark:text-emerald-400"
-                : "text-destructive text-xs"
-            }
+      <AccordionPanel className="px-4 pb-4 pt-1">
+        <p className="mb-3 text-xs text-neutral-500 dark:text-[#8e8e96]">
+          {PROVIDER_HELP[provider.type]}
+        </p>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">API key</Label>
+            <Input
+              type="password"
+              autoComplete="off"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={
+                provider.apiKeyPreview
+                  ? `Saved ${provider.apiKeyPreview}`
+                  : provider.type === "ollama"
+                    ? "Not required for Ollama"
+                    : "Paste API key"
+              }
+              className="h-8 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">Default model</Label>
+            <Input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="Model id"
+              className="h-8 text-xs"
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">Base URL</Label>
+            <Input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={PROVIDER_BASE_HINT[provider.type]}
+              className="h-8 text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={saving}
+            onClick={() => void save()}
+            className="h-7 px-3 text-xs"
           >
-            {result.ok ? (
-              <CheckCircle2Icon className="me-1 inline size-3" />
-            ) : (
-              <TriangleAlertIcon className="me-1 inline size-3" />
-            )}
-            {result.message}
-          </span>
-        )}
-      </div>
-    </div>
+            Save
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={testing || saving}
+            onClick={() => void test()}
+            className="h-7 text-xs"
+          >
+            {testing ? "Testing…" : "Test connection"}
+          </Button>
+          {result && (
+            <span
+              className={cn(
+                "text-xs inline-flex items-center gap-1",
+                result.ok ? "text-emerald-500 dark:text-emerald-400" : "text-destructive",
+              )}
+            >
+              {result.ok ? (
+                <CheckCircle2Icon className="size-3" />
+              ) : (
+                <TriangleAlertIcon className="size-3" />
+              )}
+              {result.message}
+            </span>
+          )}
+        </div>
+      </AccordionPanel>
+    </AccordionItem>
   );
 }
 
@@ -936,42 +1391,52 @@ function AddProviderForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-2">
-      <div className="space-y-1.5">
-        <Label>Name</Label>
+    <div className="mt-3 grid gap-2 border-t border-neutral-200 dark:border-white/[0.08] pt-3 sm:grid-cols-2">
+      <div className="space-y-1">
+        <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">Name</Label>
         <Input
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(e) => setName(e.target.value)}
           placeholder="LM Studio"
+          className="h-8 text-xs"
         />
       </div>
-      <div className="space-y-1.5">
-        <Label>Default model</Label>
+      <div className="space-y-1">
+        <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">Default model</Label>
         <Input
           value={model}
-          onChange={(event) => setModel(event.target.value)}
+          onChange={(e) => setModel(e.target.value)}
           placeholder="local-model"
+          className="h-8 text-xs"
         />
       </div>
-      <div className="space-y-1.5">
-        <Label>Base URL</Label>
+      <div className="space-y-1">
+        <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">Base URL</Label>
         <Input
           value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder={baseUrl}
+          className="h-8 text-xs"
         />
       </div>
-      <div className="space-y-1.5">
-        <Label>API key (optional)</Label>
+      <div className="space-y-1">
+        <Label className="text-xs text-neutral-500 dark:text-[#8e8e96]">API key (optional)</Label>
         <Input
           type="password"
           value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(e) => setApiKey(e.target.value)}
           placeholder="Optional"
+          className="h-8 text-xs"
         />
       </div>
-      <div className="sm:col-span-2">
-        <Button size="sm" disabled={saving} onClick={() => void create()}>
-          <PlusIcon />
+      <div className="sm:col-span-2 pt-1">
+        <Button
+          size="sm"
+          disabled={saving}
+          onClick={() => void create()}
+          className="h-8 px-3 text-xs"
+        >
+          <PlusIcon className="size-3.5 me-1" />
           Add provider
         </Button>
       </div>

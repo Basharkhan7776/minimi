@@ -16,7 +16,7 @@ Hono server on 127.0.0.1:8787
   ├─ agent: system prompt + streamText + tool loop
   ├─ search: expand → providers → dedupe → extract → dates → cache
   ├─ memory: extract after each turn; hybrid recall before each turn
-  └─ reminders: chat tool or fallback extractor → events → 15 min scheduler
+  └─ reminders: chat tool or fallback extractor → events → 30 s scheduler
         │
         ├─ SQLite WAL: sessions, messages, files, memories, reminders, providers, settings
         ├─ FTS5: messages by keyword and date
@@ -67,7 +67,7 @@ Extraction is asynchronous and failure-tolerant: a failed extraction never costs
 
 ## Reminders (Second Brain)
 
-Reminders are local rows plus precomputed **events**, which makes the scheduler idempotent: timed reminders get one event at `T`; all-day reminders get events every 2 hours from 09:00 to 21:00 local. Events are unique on `(reminder, kind, scheduled_for)`. A 15 min tick fires due events; the client claims them from `/api/reminder-events/pending` and shows a Tauri/browser notification or an in-app toast. A bell in the top-right opens a right-side notification drawer with the active reminders. The agent creates reminders with `create_reminder`; explicit reminder phrases are also caught by a cheap fallback extractor, and `source_message_id` dedupes retries. Chat titles regenerate every six user turns unless the user renamed the chat, which locks the title.
+Reminders are local rows plus precomputed **events**, which makes the scheduler idempotent: timed reminders get one event at `T`; all-day reminders get events every 2 hours from 09:00 to 21:00 local. Events are unique on `(reminder, kind, scheduled_for)`. A 30 second tick fires due events, including ones that became due while the app was asleep; the client claims them from `/api/reminder-events/pending` and shows a Tauri/browser notification or an in-app toast. A bell in the top-right opens a right-side notification drawer with the active reminders. The agent creates reminders with `create_reminder`; explicit reminder phrases are also caught by a cheap fallback extractor, and `source_message_id` dedupes retries. Chat titles regenerate every six user turns unless the user renamed the chat, which locks the title.
 
 ## Storage and providers
 

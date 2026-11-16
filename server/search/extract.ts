@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import type { SearchResult } from "../db/types";
+import { boundedSignal } from "./signal";
 
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
@@ -86,6 +87,42 @@ function extractPublishedAt(document: Document): string | null {
   return null;
 }
 
+async function readLimited(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer.slice(0, maxBytes));
+  }
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (received < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const remaining = maxBytes - received;
+      if (value.byteLength > remaining) {
+        chunks.push(value.subarray(0, remaining));
+        received += remaining;
+        break;
+      }
+      chunks.push(value);
+      received += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export async function extractPage(
   url: string,
   options?: { signal?: AbortSignal },
@@ -132,7 +169,7 @@ export async function extractPage(
   }
 
   try {
-    const signal = options?.signal ?? AbortSignal.timeout(9000);
+    const signal = boundedSignal(options?.signal, 9000);
     let response: Response | null = null;
     for (let hop = 0; hop <= 4; hop += 1) {
       if (isPrivateHost(parsed.hostname)) {
@@ -192,8 +229,7 @@ export async function extractPage(
       };
     }
     const contentType = response.headers.get("content-type") ?? "";
-    const buffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(buffer.slice(0, MAX_BYTES));
+    const bytes = await readLimited(response, MAX_BYTES);
     const charset =
       contentType.match(/charset=([^;]+)/i)?.[1]?.trim() ?? "utf-8";
     let html: string;

@@ -11,6 +11,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
@@ -80,11 +81,11 @@ export function MessageItem({
 
   return (
     <div className="group/message flex gap-3 px-4">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
-        <span className="font-semibold text-sm leading-none">m</span>
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-white p-1 shadow-xs border border-border/40">
+        <img src="/minimi.svg" alt="Minimi" className="size-full object-contain" />
       </div>
       <div className="min-w-0 flex-1">
-        {!hasContent && streaming && <ThinkingDots />}
+        {!hasContent && streaming && <ThinkingLoader />}
         {parts.map((part, index) => {
           if (part.type === "text") {
             if (!part.text?.trim()) return null;
@@ -171,7 +172,11 @@ function Reasoning({ text, streaming }: { text: string; streaming: boolean }) {
         onClick={() => setOpen((value) => !value)}
         className="flex items-center gap-1.5 text-muted-foreground text-xs hover:text-foreground"
       >
-        <BrainIcon className="size-3.5" />
+        {streaming ? (
+          <Spinner className="size-3.5 text-foreground/80" />
+        ) : (
+          <BrainIcon className="size-3.5" />
+        )}
         {streaming ? "Thinking…" : "Thought process"}
         <span className="text-[10px]">{open ? "hide" : "show"}</span>
       </button>
@@ -184,12 +189,11 @@ function Reasoning({ text, streaming }: { text: string; streaming: boolean }) {
   );
 }
 
-function ThinkingDots() {
+function ThinkingLoader() {
   return (
-    <div className="flex h-6 items-center gap-1 text-muted-foreground">
-      <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-current" />
+    <div className="flex h-7 items-center gap-2 text-muted-foreground text-xs">
+      <Spinner className="size-3.5 text-foreground/70" />
+      <span>Thinking…</span>
     </div>
   );
 }

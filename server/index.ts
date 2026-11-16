@@ -65,6 +65,7 @@ import {
   memoryStats,
   rebuildMemories,
   saveMemories,
+  syncReminderMemory,
 } from "./memory";
 import { deleteFileRecord } from "./db/files";
 
@@ -398,7 +399,7 @@ app.post("/api/reminders", async (c) => {
   if (!body.title || !body.dueDate) {
     return c.json({ error: "title and dueDate are required" }, 400);
   }
-  const result = createReminderFromInput({
+  const result = await createReminderFromInput({
     sessionId: body.sessionId ?? null,
     reminder: {
       title: body.title,
@@ -467,10 +468,13 @@ app.patch("/api/reminders/:id", async (c) => {
     ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
     ...(body.status !== undefined ? { status: body.status } : {}),
   });
+  if (reminder) await syncReminderMemory(reminder, existing);
   return c.json({ reminder });
 });
 
-app.delete("/api/reminders/:id", (c) => {
+app.delete("/api/reminders/:id", async (c) => {
+  const existing = getReminder(c.req.param("id"));
+  if (existing) await syncReminderMemory({ ...existing, status: "done" }, existing);
   deleteReminder(c.req.param("id"));
   return c.json({ ok: true });
 });
@@ -587,6 +591,12 @@ const EDITABLE_SETTINGS = new Set([
   "chat.autoTitle",
   "notifications.enabled",
   "app.theme",
+  "app.language",
+  "user.name",
+  "user.email",
+  "user.xHandle",
+  "user.birthYear",
+  "user.plan",
 ]);
 
 app.get("/api/settings", (c) => c.json({ settings: getAllSettings() }));

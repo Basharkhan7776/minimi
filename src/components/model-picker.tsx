@@ -11,7 +11,6 @@ import {
   MenuTrigger,
 } from "@/components/ui/menu";
 import { Button } from "@/components/ui/button";
-import { ProviderBadge } from "@/components/provider-badge";
 import { modelOptions, providerColor } from "@/lib/models";
 import type { PublicProvider } from "@/lib/types";
 
@@ -42,7 +41,6 @@ export function ModelPicker({
           />
         }
       >
-        <ProviderBadge provider={current} />
         <span className="truncate">{model || "Select a model"}</span>
         <ChevronsUpDownIcon className="text-muted-foreground" />
       </MenuTrigger>

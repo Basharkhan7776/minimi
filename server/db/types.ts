@@ -90,6 +90,7 @@ export interface MemoryRecord {
   text: string;
   eventDate: string | null;
   createdAt: number;
+  reminderId?: string | null;
 }
 
 export interface SearchResult {

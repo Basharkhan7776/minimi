@@ -9,6 +9,7 @@ interface MemoryRow {
   text: string;
   event_date: string | null;
   created_at: number;
+  reminder_id?: string | null;
 }
 
 function mapMemory(row: MemoryRow): MemoryRecord {
@@ -20,6 +21,7 @@ function mapMemory(row: MemoryRow): MemoryRecord {
     text: row.text,
     eventDate: row.event_date,
     createdAt: row.created_at,
+    reminderId: row.reminder_id ?? null,
   };
 }
 
@@ -31,8 +33,8 @@ export function insertMemory(
   const transaction = db.transaction(() => {
     db.prepare(
       `INSERT OR REPLACE INTO memories
-        (id, session_id, message_id, kind, text, event_date, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        (id, session_id, message_id, kind, text, event_date, created_at, reminder_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       memory.id,
       memory.sessionId,
@@ -41,6 +43,7 @@ export function insertMemory(
       memory.text,
       memory.eventDate,
       memory.createdAt,
+      memory.reminderId ?? null,
     );
     db.prepare("DELETE FROM vec_memories WHERE memory_id = ?").run(memory.id);
     db.prepare(
@@ -120,6 +123,35 @@ export function vectorSearch(
     eventDate: row.event_date,
     createdAt: 0,
     distance: row.distance,
+  }));
+}
+
+export function listMemoriesForReminder(reminderId: string): MemoryRecord[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM memories WHERE reminder_id = ?")
+    .all(reminderId) as MemoryRow[];
+  return rows.map(mapMemory);
+}
+
+export function listMemoryTexts(): Array<{
+  id: string;
+  text: string;
+  kind: string;
+  reminderId: string | null;
+}> {
+  const rows = getDb()
+    .prepare("SELECT id, text, kind, reminder_id FROM memories")
+    .all() as Array<{
+    id: string;
+    text: string;
+    kind: string;
+    reminder_id: string | null;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    text: row.text,
+    kind: row.kind,
+    reminderId: row.reminder_id,
   }));
 }
 

@@ -38,6 +38,21 @@ export interface RecallMemoryOutput {
   note?: string;
 }
 
+export interface CreateReminderOutput {
+  ok?: boolean;
+  duplicate?: boolean;
+  error?: string;
+  note?: string;
+  reminder?: {
+    id: string;
+    title: string;
+    dueDate: string;
+    dueTime?: string | null;
+    url?: string | null;
+    status?: string;
+  };
+}
+
 export interface ToolPart {
   type: string;
   state: string;

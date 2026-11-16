@@ -48,6 +48,16 @@ function migrate(instance: Database.Database): void {
       "ALTER TABLE sessions ADD COLUMN title_turn INTEGER NOT NULL DEFAULT 0",
     );
   }
+
+  const memoryColumns = instance
+    .prepare("PRAGMA table_info(memories)")
+    .all() as Array<{ name: string }>;
+  if (!memoryColumns.some((column) => column.name === "reminder_id")) {
+    instance.exec("ALTER TABLE memories ADD COLUMN reminder_id TEXT");
+  }
+  instance.exec(
+    "CREATE INDEX IF NOT EXISTS idx_memories_reminder ON memories(reminder_id)",
+  );
 }
 
 function repairProviderDefaults(instance: Database.Database): void {
@@ -112,6 +122,12 @@ function setDefaultSettings(instance: Database.Database): void {
     "chat.autoTitle": "1",
     "notifications.enabled": "1",
     "app.theme": "system",
+    "app.language": "English",
+    "user.name": "Bashar Khan",
+    "user.email": "basharkhan7776@gmail.com",
+    "user.xHandle": "@_Bashar_khan_",
+    "user.birthYear": "2004",
+    "user.plan": "Free",
   };
   const insert = instance.prepare(
     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",

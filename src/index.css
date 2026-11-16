@@ -245,6 +245,11 @@
   body {
     @apply antialiased;
     }
+
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 .streamdown-root > :first-child {

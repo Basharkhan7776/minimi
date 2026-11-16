@@ -62,8 +62,9 @@ export async function webSearch(options: {
   const maxResults = options.maxResults ?? Number(getSetting("search.maxResults") ?? 5);
   const ttl = Number(getSetting("search.cacheTtlMinutes") ?? 180);
   const provider = resolveProvider();
+  const contextKey = options.context ? hashKey(options.context).slice(0, 16) : "";
   const cacheKey = hashKey(
-    `${provider.name}|${options.freshness ?? "any"}|${maxResults}|${options.query.toLowerCase().trim()}`,
+    `${provider.name}|${options.freshness ?? "any"}|${maxResults}|${options.query.toLowerCase().trim()}|${contextKey}`,
   );
   const cached = readCache(cacheKey, ttl);
   if (cached) {

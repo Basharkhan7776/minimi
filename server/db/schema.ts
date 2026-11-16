@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS memories (
   kind TEXT NOT NULL DEFAULT 'fact',
   text TEXT NOT NULL,
   event_date TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  reminder_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 

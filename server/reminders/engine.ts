@@ -3,7 +3,7 @@ import {
   syncAllActiveReminderEvents,
 } from "../db/reminders";
 
-export const REMINDER_TICK_MS = 15 * 60_000;
+export const REMINDER_TICK_MS = 30_000;
 
 export function runReminderTick(now = Date.now()): number {
   return fireDueEvents(now);

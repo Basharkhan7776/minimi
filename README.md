@@ -117,7 +117,7 @@ server/
   agent/            provider factory, system prompt, tools, agent loop
   search/           DuckDuckGo/Tavily/Brave, query expansion, page extraction
   db/               schema, migrations, DAOs
-  reminders/        validation, scheduling, extraction, 15 min engine
+  reminders/        validation, scheduling, extraction, 30 s engine
   memory.ts         extraction, hybrid recall, rebuild
   embeddings.ts     local fastembed model
   file-store.ts     PDF/DOCX/text extraction
@@ -131,6 +131,6 @@ src-tauri/          thin desktop shell
 
 - The default search provider is DuckDuckGo HTML, so no paid API is required.
 - The embedding model is downloaded on first use (about 65 MB) and then cached locally.
-- Timed reminders notify at the due time. All-day reminders notify every 2 hours from 09:00 to 21:00 local time. The scheduler checks every 15 minutes while Minimi is running.
+- Timed reminders notify at the due time. All-day reminders notify every 2 hours from 09:00 to 21:00 local time. The scheduler checks every 30 seconds while Minimi is running. A missed nudge is still delivered the next time the app is open.
 - Desktop notifications use the Tauri notification plugin; the browser falls back to the Notification API or an in-app toast. The notification drawer always updates.
 - The API binds to `127.0.0.1` by default. CORS is restricted to the Vite dev origin and Tauri origins. Add extra origins with `MINIMI_ALLOWED_ORIGINS`.
