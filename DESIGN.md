@@ -15,9 +15,10 @@ React 19 + Vite + Coss UI (browser or Tauri webview)
 Hono server on 127.0.0.1:8787
   ├─ agent: system prompt + streamText + tool loop
   ├─ search: expand → providers → dedupe → extract → dates → cache
-  └─ memory: extract after each turn; hybrid recall before each turn
+  ├─ memory: extract after each turn; hybrid recall before each turn
+  └─ reminders: chat tool or fallback extractor → events → 15 min scheduler
         │
-        ├─ SQLite WAL: sessions, messages, files, providers, settings
+        ├─ SQLite WAL: sessions, messages, files, memories, reminders, providers, settings
         ├─ FTS5: messages by keyword and date
         ├─ sqlite-vec: 384-dim memory vectors
         └─ fastembed: local bge-small-en-v1.5 (no embedding API)
@@ -30,8 +31,8 @@ The Node server owns the agent loop, tools, keys, database, and streaming protoc
 1. Composer sends a `UIMessage` to `POST /api/chat`, with optional attachment IDs.
 2. Server creates or loads the session, persists the user message immediately (a refresh never loses it), and loads extracted file text.
 3. It recalls relevant memories with a 2.5 s best-effort timeout, then builds a system prompt containing the current date/time, memories, and attachments.
-4. `streamText` runs the model with three tools and `stepCountIs(8)`: `web_search`, `fetch_url`, `recall_memory`. The model may call them in any order; results return to the same loop.
-5. Text, reasoning, and tool calls stream to the UI as they happen. On completion the assistant message is saved. Memory extraction and auto-titling run in the background and never delay the response.
+4. `streamText` runs the model with four tools and `stepCountIs(8)`: `web_search`, `fetch_url`, `recall_memory`, `create_reminder`. The model may call them in any order; results return to the same loop.
+5. Text, reasoning, and tool calls stream to the UI as they happen. On completion the assistant message is saved. Memory extraction, reminder fallback, and auto-titling run in the background and never delay the response.
 
 Only the last 40 messages are sent to the model. `maxRetries: 1` and temperature 0.4 keep the loop stable without hiding provider errors.
 
@@ -64,6 +65,10 @@ Recall is hybrid: embed the query locally, take 24 `sqlite-vec` candidates, run 
 
 Extraction is asynchronous and failure-tolerant: a failed extraction never costs the chat, and **Rebuild from history** re-embeds user turns after model changes. Embeddings run locally; no conversation text leaves the machine for memory.
 
+## Reminders (Second Brain)
+
+Reminders are local rows plus precomputed **events**, which makes the scheduler idempotent: timed reminders get one event at `T`; all-day reminders get events every 2 hours from 09:00 to 21:00 local. Events are unique on `(reminder, kind, scheduled_for)`. A 15 min tick fires due events; the client claims them from `/api/reminder-events/pending` and shows a Tauri/browser notification or an in-app toast. A bell in the top-right opens a right-side notification drawer with the active reminders. The agent creates reminders with `create_reminder`; explicit reminder phrases are also caught by a cheap fallback extractor, and `source_message_id` dedupes retries. Chat titles regenerate every six user turns unless the user renamed the chat, which locks the title.
+
 ## Storage and providers
 
 SQLite in WAL mode is the entire state: `sessions`, `messages`, `messages_fts`, `files`, `memories`, `vec_memories`, `providers`, `settings`, `search_cache`. Data lives in `~/.local/share/minimi` (platform equivalent; `MINIMI_DATA_DIR` overrides). Migrations are minimal because this is a single-user local app; that would change for a hosted product.
@@ -78,7 +83,7 @@ Tauri loads the same Vite URL and serves the same API; production packaging expe
 
 ## Failure and security
 
-Streaming first; memory and titles after. Budgets: 9 s/page, 12 s/search provider, 2.5 s auto-recall. If embeddings fail, FTS still works; if enrichment fails, snippets remain; if a provider fails, the UI shows a retry card with the real error. Work is bounded: 40 messages, 3 queries, 3 pages, 9,000 characters of page text per search, 8 steps.
+Streaming first; memory, reminders, and titles after. Budgets: 9 s/page, 12 s/search provider, 2.5 s auto-recall. If embeddings fail, FTS still works; if enrichment fails, snippets remain; if a provider fails, the UI shows a retry card with the real error. Work is bounded: 40 messages, 3 queries, 3 pages, 9,000 characters of page text per search, 8 steps.
 
 The API binds to `127.0.0.1` and CORS is restricted to the Vite and Tauri origins, so a random website cannot read local chats through loopback. API keys are excluded from exports; there is no telemetry. Keys are plaintext in SQLite — acceptable for a single-user local app, not for a hosted one.
 
@@ -100,7 +105,7 @@ The API binds to `127.0.0.1` and CORS is restricted to the Vite and Tauri origin
 3. Clickable inline `[S1]` citations instead of plain text.
 4. Stream search queries as they are issued, not only when the tool returns.
 5. Provider fallback and remote model presets.
-6. Tauri sidecar packaging and OS-keychain-backed secrets.
+6. Tauri sidecar packaging, OS-keychain-backed secrets, and reminders that survive a closed app.
 7. Memory quality loop: "forget this", duplicate merging, and a preview before saving.
 
 The biggest open question is evidence quality, not architecture: DuckDuckGo HTML is free and good, but not every result exposes a date and some publishers block extraction. The date parser, snippet fallback, and explicit "undated" instruction are the current mitigations; a paid search API or browser fetcher is the next lever.

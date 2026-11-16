@@ -207,6 +207,7 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent className="gap-0">
+
         {pinned.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel className="gap-1.5">

@@ -5,6 +5,8 @@ import type {
   MemoryRecord,
   MemoryStats,
   PublicProvider,
+  Reminder,
+  ReminderEvent,
   Session,
   SessionDetail,
 } from "./types";
@@ -159,6 +161,50 @@ export const api = {
       body: JSON.stringify({ model }),
     }),
 
+  listReminders: (status: "active" | "done" | "all" = "active") =>
+    request<{ reminders: Reminder[]; activeCount: number }>(
+      `/api/reminders?status=${status}`,
+    ),
+
+  createReminder: (input: {
+    title: string;
+    dueDate: string;
+    dueTime?: string | null;
+    notes?: string | null;
+    url?: string | null;
+    sessionId?: string | null;
+    timezone?: string | null;
+  }) =>
+    request<{ reminder: Reminder; duplicate?: boolean }>("/api/reminders", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateReminder: (
+    id: string,
+    patch: Partial<{
+      title: string;
+      dueDate: string;
+      dueTime: string | null;
+      notes: string | null;
+      url: string | null;
+      timezone: string | null;
+      status: "active" | "done";
+    }>,
+  ) =>
+    request<{ reminder: Reminder }>(
+      `/api/reminders/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+
+  deleteReminder: (id: string) =>
+    request<{ ok: boolean }>(`/api/reminders/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  pendingReminderEvents: () =>
+    request<{ events: ReminderEvent[] }>("/api/reminder-events/pending"),
+
   getSettings: () =>
     request<{ settings: Record<string, string> }>("/api/settings"),
 
@@ -198,6 +244,7 @@ export const api = {
       importedSessions: number;
       importedMessages: number;
       importedMemories?: number;
+      importedReminders?: number;
     }>("/api/import", { method: "POST", body: JSON.stringify(data) }),
 
   clearData: () =>

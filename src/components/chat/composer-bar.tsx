@@ -127,10 +127,6 @@ export function ComposerBar({
           </ComposerActionGroup>
         </ComposerActions>
       </Composer>
-      <p className="mt-2 text-center text-[11px] text-muted-foreground">
-        Minimi can search the web and remember what you tell it. Verify
-        important answers.
-      </p>
     </div>
   );
 }

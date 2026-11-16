@@ -10,10 +10,14 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ChatPage } from "@/components/chat/chat-page";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ReminderDialog } from "@/components/reminders/reminder-dialog";
 import { api } from "@/lib/api";
+import { showSystemNotification } from "@/lib/notifications";
+import { formatReminderDue, nudgeBody } from "@/lib/reminders";
 import type {
   BootstrapData,
   ChatUIMessage,
+  Reminder,
   Session,
 } from "@/lib/types";
 
@@ -31,8 +35,14 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("providers");
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [reminderDialogOpen, setReminderDialogOpen] = useState(false);
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
+  const remindersRef = useRef<Reminder[]>([]);
   const loadSeq = useRef(0);
   const themeSynced = useRef(false);
+
+  remindersRef.current = reminders;
 
   const refreshSessions = useCallback(async (query = "") => {
     try {
@@ -53,6 +63,17 @@ export default function App() {
     }
   }, []);
 
+  const refreshReminders = useCallback(async () => {
+    try {
+      const result = await api.listReminders("active");
+      setReminders(result.reminders);
+      return result.reminders;
+    } catch (error) {
+      console.error("[reminders] could not load", error);
+      return [];
+    }
+  }, []);
+
   const loadBootstrap = useCallback(async () => {
     try {
       const data = await api.bootstrap();
@@ -68,7 +89,66 @@ export default function App() {
   useEffect(() => {
     void loadBootstrap();
     void refreshSessions();
-  }, [loadBootstrap, refreshSessions]);
+    void refreshReminders();
+  }, [loadBootstrap, refreshSessions, refreshReminders]);
+
+  useEffect(() => {
+    const timer = setInterval(() => void refreshReminders(), 30_000);
+    return () => clearInterval(timer);
+  }, [refreshReminders]);
+
+  useEffect(() => {
+    if (!bootstrap) return;
+    if (bootstrap.settings["notifications.enabled"] === "0") return;
+    let cancelled = false;
+
+    async function pollNotifications() {
+      try {
+        const { events } = await api.pendingReminderEvents();
+        if (cancelled || events.length === 0) return;
+        for (const event of events) {
+          const reminder = remindersRef.current.find(
+            (item) => item.id === event.reminderId,
+          );
+          const title = event.reminderTitle ?? reminder?.title ?? "Reminder";
+          const body = reminder
+            ? `${formatReminderDue(reminder)} · ${nudgeBody(event)}`
+            : nudgeBody(event);
+          const open = () => {
+            if (event.sessionId) void selectSession(event.sessionId);
+          };
+          const shown = await showSystemNotification({
+            title: `Minimi · ${title}`,
+            body,
+            tag: event.id,
+            onClick: open,
+          });
+          if (!shown) {
+            toast(title, {
+              description: body,
+              action: event.sessionId
+                ? { label: "Open chat", onClick: open }
+                : undefined,
+            });
+          }
+        }
+        if (!cancelled) void refreshReminders();
+      } catch {
+        // The next poll will retry; notifications must never break chat.
+      }
+    }
+
+    void pollNotifications();
+    const timer = setInterval(() => void pollNotifications(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [
+    activeSessionId,
+    bootstrap,
+    refreshReminders,
+  ]);
 
   useEffect(() => {
     if (!bootstrap || themeSynced.current) return;
@@ -118,7 +198,11 @@ export default function App() {
   }
 
   async function refreshAll() {
-    const [, list] = await Promise.all([loadBootstrap(), refreshSessions(search)]);
+    const [, list] = await Promise.all([
+      loadBootstrap(),
+      refreshSessions(search),
+      refreshReminders(),
+    ]);
     if (activeSessionId && !list.some((session) => session.id === activeSessionId)) {
       newChat();
     }
@@ -165,6 +249,35 @@ export default function App() {
         error instanceof Error ? error.message : "Could not delete conversation.",
       );
     }
+  }
+
+  async function doneReminder(reminder: Reminder) {
+    try {
+      await api.updateReminder(reminder.id, { status: "done" });
+      setReminders((current) =>
+        current.filter((item) => item.id !== reminder.id),
+      );
+      toast.success("Reminder done. Nudges stopped.");
+      void refreshReminders();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not update reminder.",
+      );
+    }
+  }
+
+  function addReminder() {
+    setEditingReminder(null);
+    setReminderDialogOpen(true);
+  }
+
+  function editReminder(reminder: Reminder) {
+    setEditingReminder(reminder);
+    setReminderDialogOpen(true);
+  }
+
+  function openReminderChat(sessionId: string) {
+    void selectSession(sessionId);
   }
 
   function openSettings(tab = "providers") {
@@ -239,9 +352,17 @@ export default function App() {
               bootstrap={bootstrap}
               session={activeSession}
               initialMessages={initialMessages}
+              reminders={reminders}
               onSessionCreated={handleSessionCreated}
-              onSessionsChanged={() => void refreshSessions(search)}
+              onSessionsChanged={() => {
+                void refreshSessions(search);
+                void refreshReminders();
+              }}
               onOpenSettings={() => openSettings("providers")}
+              onOpenReminderChat={openReminderChat}
+              onDoneReminder={(reminder) => void doneReminder(reminder)}
+              onAddReminder={addReminder}
+              onEditReminder={editReminder}
             />
           )}
         </SidebarInset>
@@ -271,6 +392,14 @@ export default function App() {
           if (pendingDelete) void deleteSession(pendingDelete);
           setPendingDelete(null);
         }}
+      />
+
+      <ReminderDialog
+        open={reminderDialogOpen}
+        onOpenChange={setReminderDialogOpen}
+        reminder={editingReminder}
+        sessionId={activeSessionId}
+        onSaved={() => void refreshReminders()}
       />
 
       <Toaster position="top-center" />

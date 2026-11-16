@@ -23,6 +23,7 @@ export interface AgentRun {
   assistantId: string;
   result: StreamTextResult<AgentTools, any, any>;
   userText: string;
+  userMessageId: string | null;
   memories: MemoryHit[];
 }
 
@@ -41,14 +42,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   });
 }
 
-function lastUserText(messages: UIMessage[]): string {
+function lastUserMessage(messages: UIMessage[]): { id: string | null; text: string } {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== "user") continue;
     const text = extractText(message.parts);
-    if (text) return text;
+    if (text) return { id: message.id, text };
   }
-  return "";
+  return { id: null, text: "" };
 }
 
 function contextText(messages: UIMessage[], maxMessages = 10): string {
@@ -69,7 +70,8 @@ export async function prepareAgentRun(input: {
   abortSignal?: AbortSignal;
 }): Promise<AgentRun> {
   const resolved = resolveSessionModel(input.session);
-  const userText = lastUserText(input.messages);
+  const lastUser = lastUserMessage(input.messages);
+  const userText = lastUser.text;
 
   const files: FileRecord[] =
     input.attachmentIds && input.attachmentIds.length > 0
@@ -86,6 +88,8 @@ export async function prepareAgentRun(input: {
   const tools = createAgentTools({
     model: resolved.model,
     context: contextText(input.messages),
+    sessionId: input.session.id,
+    userMessageId: lastUser.id,
   });
 
   const maxSteps = Number(getSetting("chat.maxSteps") ?? 8);
@@ -114,6 +118,7 @@ export async function prepareAgentRun(input: {
     assistantId: nanoid(16),
     result,
     userText,
+    userMessageId: lastUser.id,
     memories,
   };
 }

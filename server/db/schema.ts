@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL DEFAULT 'New chat',
+  title_locked INTEGER NOT NULL DEFAULT 0,
+  title_turn INTEGER NOT NULL DEFAULT 0,
   pinned INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
   provider_id TEXT,
@@ -61,6 +63,38 @@ CREATE TABLE IF NOT EXISTS files (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_files_session ON files(session_id);
+
+CREATE TABLE IF NOT EXISTS reminders (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  notes TEXT,
+  url TEXT,
+  due_date TEXT NOT NULL,
+  due_time TEXT,
+  timezone TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  source_message_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  completed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status, due_date, due_time);
+CREATE INDEX IF NOT EXISTS idx_reminders_session ON reminders(session_id);
+
+CREATE TABLE IF NOT EXISTS reminder_events (
+  id TEXT PRIMARY KEY,
+  reminder_id TEXT NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  scheduled_for INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  fired_at INTEGER,
+  notified_at INTEGER,
+  created_at INTEGER NOT NULL,
+  UNIQUE(reminder_id, kind, scheduled_for)
+);
+CREATE INDEX IF NOT EXISTS idx_reminder_events_pending ON reminder_events(status, scheduled_for);
+CREATE INDEX IF NOT EXISTS idx_reminder_events_reminder ON reminder_events(reminder_id, status);
 
 CREATE TABLE IF NOT EXISTS providers (
   id TEXT PRIMARY KEY,
@@ -117,7 +151,7 @@ export const DEFAULT_PROVIDERS = [
     id: "google",
     type: "google",
     name: "Google",
-    defaultModel: "gemini-2.5-flash",
+    defaultModel: "gemini-3.5-flash",
     envKey: "GOOGLE_GENERATIVE_AI_API_KEY",
     sortOrder: 2,
   },
@@ -125,7 +159,7 @@ export const DEFAULT_PROVIDERS = [
     id: "openrouter",
     type: "openrouter",
     name: "OpenRouter",
-    defaultModel: "openai/gpt-4.1-mini",
+    defaultModel: "openrouter/free",
     envKey: "OPENROUTER_API_KEY",
     sortOrder: 3,
   },

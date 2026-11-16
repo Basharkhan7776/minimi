@@ -5,6 +5,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
   ArrowDownIcon,
+  BellIcon,
   GlobeIcon,
   LightbulbIcon,
   PinIcon,
@@ -19,13 +20,16 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { API_BASE, api } from "@/lib/api";
 import { greeting } from "@/lib/format";
+import { activeReminders } from "@/lib/reminders";
 import type {
   AttachmentMeta,
   BootstrapData,
   ChatUIMessage,
+  Reminder,
   Session,
 } from "@/lib/types";
 import { ModelPicker } from "@/components/model-picker";
+import { ReminderDrawer } from "@/components/reminders/reminder-drawer";
 import { ComposerBar } from "./composer-bar";
 import { MessageItem } from "./message-item";
 
@@ -56,16 +60,26 @@ export function ChatPage({
   bootstrap,
   session,
   initialMessages,
+  reminders,
   onSessionCreated,
   onSessionsChanged,
   onOpenSettings,
+  onOpenReminderChat,
+  onDoneReminder,
+  onAddReminder,
+  onEditReminder,
 }: {
   bootstrap: BootstrapData;
   session: Session | null;
   initialMessages: ChatUIMessage[];
+  reminders: Reminder[];
   onSessionCreated: (session: Session) => void;
   onSessionsChanged: () => void;
   onOpenSettings: () => void;
+  onOpenReminderChat: (sessionId: string) => void;
+  onDoneReminder: (reminder: Reminder) => void;
+  onAddReminder: () => void;
+  onEditReminder: (reminder: Reminder) => void;
 }) {
   const enabledProviders = bootstrap.providers.filter(
     (provider) => provider.enabled,
@@ -84,6 +98,8 @@ export function ChatPage({
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const activeReminderCount = activeReminders(reminders).length;
 
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const chatIdRef = useRef(session?.id ?? `draft-${Date.now()}`);
@@ -128,7 +144,8 @@ export function ChatPage({
     throttle: 40,
     onFinish: () => {
       onSessionsChanged();
-      setTimeout(onSessionsChanged, 1600);
+      setTimeout(onSessionsChanged, 2500);
+      setTimeout(onSessionsChanged, 9000);
     },
     onError: (error) => {
       toast.error(error.message || "The model request failed.");
@@ -290,6 +307,20 @@ export function ChatPage({
           <Button
             variant="ghost"
             size="icon-sm"
+            aria-label="Notifications"
+            className="relative"
+            onClick={() => setRemindersOpen(true)}
+          >
+            <BellIcon />
+            {activeReminderCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 font-medium text-[9px] text-primary-foreground leading-4">
+                {activeReminderCount > 9 ? "9+" : activeReminderCount}
+              </span>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             aria-label="Settings"
             onClick={onOpenSettings}
           >
@@ -382,6 +413,25 @@ export function ChatPage({
           <div className="shrink-0">{composer}</div>
         </>
       )}
+
+      <ReminderDrawer
+        open={remindersOpen}
+        onOpenChange={setRemindersOpen}
+        reminders={reminders}
+        onAdd={() => {
+          setRemindersOpen(false);
+          onAddReminder();
+        }}
+        onDone={onDoneReminder}
+        onOpenChat={(id) => {
+          setRemindersOpen(false);
+          onOpenReminderChat(id);
+        }}
+        onEdit={(reminder) => {
+          setRemindersOpen(false);
+          onEditReminder(reminder);
+        }}
+      />
     </div>
   );
 }

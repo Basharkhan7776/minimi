@@ -1,6 +1,6 @@
 # Minimi
 
-Minimi is a local-first research agent with web search, file reading, and long-term memory. It looks like a modern chat app, but every conversation, file, and memory stays in a SQLite database on your machine.
+Minimi is a local-first research agent with web search, file reading, long-term memory, and a built-in Second Brain. It looks like a modern chat app, but every conversation, file, memory, and reminder stays in a SQLite database on your machine.
 
 ![Minimi chat interface](docs/screenshot.png)
 
@@ -23,6 +23,7 @@ That means the agent has to recover earlier context, know what day it is, search
 - Fetch any URL and read it as clean text.
 - Long-term memory backed by local embeddings (`bge-small-en-v1.5`) and `sqlite-vec`, plus SQLite full-text search over every message.
 - Memory extraction after each turn, date-aware recall, and a one-click rebuild from history.
+- Second Brain reminders in a right-side notification drawer, with optional links and system notifications.
 - File attachments: text, markdown, JSON, CSV, PDF, DOCX, and HTML are extracted and injected into the prompt.
 - Multiple providers: OpenAI, Anthropic, Google, OpenRouter, Ollama, and any OpenAI-compatible endpoint.
 - Local sessions with search, pinning, renaming, deleting, export, and import.
@@ -47,7 +48,7 @@ You need at least one model provider:
 2. Open **Settings -> Providers** in the app, paste a key, enable the provider, and click **Test connection**, or
 3. Install [Ollama](https://ollama.com), run `ollama pull llama3.2`, and leave the default Ollama provider enabled.
 
-DuckDuckGo search works without any key. Tavily and Brave are optional.
+DuckDuckGo search works without any key. Tavily and Brave are optional. OpenRouter's default model is the free router, `openrouter/free`; Google defaults to `gemini-3.5-flash` because `gemini-2.5-flash` is retired for new API keys. Both can be changed in Settings or by editing the provider's default model.
 
 ## Scripts
 
@@ -69,7 +70,7 @@ All keys are optional individually, but you need one model provider.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | OpenAI models | One model provider |
 | `ANTHROPIC_API_KEY` | Anthropic Claude models | One model provider |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini models | One model provider |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini models (aliases: `GOOGLE_AI_STUDIO_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`) | One model provider |
 | `OPENROUTER_API_KEY` | OpenRouter models | One model provider |
 | `BRAVE_API_KEY` | Brave web search | No |
 | `TAVILY_API_KEY` | Tavily web search | No |
@@ -86,7 +87,7 @@ By default:
 
 Override with `MINIMI_DATA_DIR`. The folder contains `minimi.db`, extracted files, and the local embedding model cache.
 
-Use **Settings -> Data** to export a JSON backup or delete all local data. API keys are never included in exports.
+Use **Settings -> Data** to export a JSON backup or delete all local data. Exports include conversations, messages, memories, reminders, settings, and provider metadata; API keys are never included. Reminders notify only while the app/server is running.
 
 ## Architecture
 
@@ -116,6 +117,7 @@ server/
   agent/            provider factory, system prompt, tools, agent loop
   search/           DuckDuckGo/Tavily/Brave, query expansion, page extraction
   db/               schema, migrations, DAOs
+  reminders/        validation, scheduling, extraction, 15 min engine
   memory.ts         extraction, hybrid recall, rebuild
   embeddings.ts     local fastembed model
   file-store.ts     PDF/DOCX/text extraction
@@ -129,4 +131,6 @@ src-tauri/          thin desktop shell
 
 - The default search provider is DuckDuckGo HTML, so no paid API is required.
 - The embedding model is downloaded on first use (about 65 MB) and then cached locally.
+- Timed reminders notify at the due time. All-day reminders notify every 2 hours from 09:00 to 21:00 local time. The scheduler checks every 15 minutes while Minimi is running.
+- Desktop notifications use the Tauri notification plugin; the browser falls back to the Notification API or an in-app toast. The notification drawer always updates.
 - The API binds to `127.0.0.1` by default. CORS is restricted to the Vite dev origin and Tauri origins. Add extra origins with `MINIMI_ALLOWED_ORIGINS`.

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { recallMemories } from "../memory";
 import { webSearch } from "../search";
 import { extractPage } from "../search/extract";
+import { createReminderFromInput } from "../reminders/service";
+import { extractFirstUrl } from "../reminders/schedule";
 
 const freshnessSchema = z
   .enum(["any", "day", "week", "month", "year"])
@@ -12,6 +14,8 @@ const freshnessSchema = z
 export function createAgentTools(options: {
   model: LanguageModel;
   context?: string;
+  sessionId?: string | null;
+  userMessageId?: string | null;
 }) {
   return {
     web_search: tool({
@@ -82,6 +86,65 @@ export function createAgentTools(options: {
           publishedAt: page.publishedAt ?? null,
           text: page.text.slice(0, 9000),
           error: page.error ?? null,
+        };
+      },
+    }),
+
+    create_reminder: tool({
+      description:
+        "Create a future reminder or task for the user. Use only when the user explicitly asks to be reminded or commits to doing something later, such as 'remind me to email HR tomorrow at 3 pm'. Resolve relative dates against today's date. Include a URL when the user mentions one.",
+      inputSchema: z.object({
+        title: z
+          .string()
+          .min(2)
+          .max(160)
+          .describe("Short action title, e.g. 'Email HR at Acme about the interview'."),
+        dueDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .describe("Local date in YYYY-MM-DD format."),
+        dueTime: z
+          .string()
+          .regex(/^\d{2}:\d{2}$/)
+          .optional()
+          .nullable()
+          .describe("Local 24-hour time HH:MM, or omit for an all-day reminder."),
+        url: z
+          .string()
+          .optional()
+          .nullable()
+          .describe("Optional website URL the user mentioned."),
+        notes: z.string().optional().nullable(),
+      }),
+      execute: async ({ title, dueDate, dueTime, url, notes }) => {
+        const result = createReminderFromInput({
+          sessionId: options.sessionId,
+          sourceMessageId: options.userMessageId,
+          reminder: {
+            title,
+            dueDate,
+            dueTime: dueTime ?? null,
+            url: url || extractFirstUrl(options.context ?? ""),
+            notes: notes ?? null,
+          },
+        });
+        if (!result.ok || !result.reminder) {
+          return { ok: false, error: result.error ?? "Could not create reminder." };
+        }
+        return {
+          ok: true,
+          duplicate: Boolean(result.duplicate),
+          reminder: {
+            id: result.reminder.id,
+            title: result.reminder.title,
+            dueDate: result.reminder.dueDate,
+            dueTime: result.reminder.dueTime,
+            url: result.reminder.url,
+            nextNudgeAt: result.reminder.nextNudgeAt,
+          },
+          note: result.duplicate
+            ? "An identical active reminder already exists."
+            : "Reminder created and added to the notifications drawer.",
         };
       },
     }),

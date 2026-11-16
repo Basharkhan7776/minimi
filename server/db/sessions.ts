@@ -5,6 +5,8 @@ import type { Session } from "./types";
 interface SessionRow {
   id: string;
   title: string;
+  title_locked: number;
+  title_turn: number;
   pinned: number;
   archived: number;
   provider_id: string | null;
@@ -18,6 +20,8 @@ function mapSession(row: SessionRow): Session {
   return {
     id: row.id,
     title: row.title,
+    titleLocked: Boolean(row.title_locked),
+    titleTurn: row.title_turn ?? 0,
     pinned: Boolean(row.pinned),
     archived: Boolean(row.archived),
     providerId: row.provider_id,
@@ -123,6 +127,7 @@ export function updateSession(
   const values: unknown[] = [];
   if (patch.title !== undefined) {
     fields.push("title = ?");
+    fields.push("title_locked = 1");
     values.push(patch.title.trim() || "New chat");
   }
   if (patch.pinned !== undefined) {
@@ -150,6 +155,29 @@ export function updateSession(
       .run(...values);
   }
   return getSession(id);
+}
+
+export function setAutoTitle(
+  id: string,
+  title: string,
+  userTurn: number,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE sessions
+       SET title = ?, title_turn = ?, updated_at = ?
+       WHERE id = ? AND title_locked = 0`,
+    )
+    .run(title, userTurn, Date.now(), id);
+}
+
+export function countUserMessages(sessionId: string): number {
+  const row = getDb()
+    .prepare(
+      "SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND role = 'user'",
+    )
+    .get(sessionId) as { n: number };
+  return row.n;
 }
 
 export function touchSession(id: string): void {

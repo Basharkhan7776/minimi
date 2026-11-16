@@ -43,6 +43,24 @@ import {
 } from "./embeddings";
 import { saveUploadedFile, removeStoredFile } from "./file-store";
 import {
+  claimPendingNotifications,
+  countReminders,
+  createReminder,
+  deleteReminder,
+  getReminder,
+  hasReminderForMessage,
+  listAllEventsForExport,
+  listAllRemindersForExport,
+  listEventsForReminder,
+  listReminders,
+  syncReminderEvents,
+  updateReminder,
+} from "./db/reminders";
+import { startReminderScheduler } from "./reminders/engine";
+import { extractReminderForTurn } from "./reminders/extract";
+import { createReminderFromInput } from "./reminders/service";
+import { validateReminderInput } from "./reminders/schedule";
+import {
   extractMemoriesForTurn,
   memoryStats,
   rebuildMemories,
@@ -92,6 +110,7 @@ app.get("/api/bootstrap", (c) => {
     settings: getAllSettings(),
     embedding: getEmbeddingStatus(),
     memory: memoryStats(),
+    reminders: { active: countReminders() },
   });
 });
 
@@ -257,6 +276,18 @@ app.post("/api/chat", async (c) => {
           } catch (error) {
             console.error("[chat] memory extraction failed", error);
           }
+          if (run.userMessageId && !hasReminderForMessage(run.userMessageId)) {
+            try {
+              await extractReminderForTurn({
+                model: resolved.model,
+                sessionId,
+                messageId: run.userMessageId,
+                userText,
+              });
+            } catch (error) {
+              console.error("[chat] reminder extraction failed", error);
+            }
+          }
           try {
             await maybeGenerateTitle({
               model: resolved.model,
@@ -334,6 +365,120 @@ app.delete("/api/files/:id", (c) => {
   return c.json({ ok: true });
 });
 
+/* ---------------------------- reminders ----------------------------- */
+
+app.get("/api/reminders", (c) => {
+  const statusParam = c.req.query("status");
+  const status =
+    statusParam === "done" ? "done" : statusParam === "all" ? undefined : "active";
+  const reminders = listReminders({
+    status,
+    sessionId: c.req.query("sessionId") || undefined,
+    limit: 200,
+  });
+  return c.json({
+    reminders: reminders.map((reminder) => ({
+      ...reminder,
+      events: listEventsForReminder(reminder.id).slice(-3),
+    })),
+    activeCount: countReminders(),
+  });
+});
+
+app.post("/api/reminders", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: string;
+    dueDate?: string;
+    dueTime?: string | null;
+    notes?: string | null;
+    url?: string | null;
+    sessionId?: string | null;
+    timezone?: string | null;
+  };
+  if (!body.title || !body.dueDate) {
+    return c.json({ error: "title and dueDate are required" }, 400);
+  }
+  const result = createReminderFromInput({
+    sessionId: body.sessionId ?? null,
+    reminder: {
+      title: body.title,
+      dueDate: body.dueDate,
+      dueTime: body.dueTime ?? null,
+      notes: body.notes ?? null,
+      url: body.url ?? null,
+      timezone: body.timezone ?? null,
+    },
+  });
+  if (!result.ok || !result.reminder) {
+    return c.json({ error: result.error ?? "Could not create reminder" }, 400);
+  }
+  return c.json(
+    { reminder: result.reminder, duplicate: Boolean(result.duplicate) },
+    201,
+  );
+});
+
+app.patch("/api/reminders/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = getReminder(id);
+  if (!existing) return c.json({ error: "Reminder not found" }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: string;
+    dueDate?: string;
+    dueTime?: string | null;
+    notes?: string | null;
+    url?: string | null;
+    timezone?: string | null;
+    status?: "active" | "done";
+  };
+
+  if (
+    body.title !== undefined ||
+    body.dueDate !== undefined ||
+    body.dueTime !== undefined
+  ) {
+    const validated = validateReminderInput(
+      {
+        title: body.title ?? existing.title,
+        dueDate: body.dueDate ?? existing.dueDate,
+        dueTime: body.dueTime !== undefined ? body.dueTime : existing.dueTime,
+        notes: body.notes !== undefined ? body.notes : existing.notes,
+        url: body.url !== undefined ? body.url : existing.url,
+        timezone: body.timezone ?? existing.timezone,
+      },
+      { allowPast: existing.status === "done" },
+    );
+    if (!validated.ok) return c.json({ error: validated.error }, 400);
+    body.title = validated.input.title;
+    body.dueDate = validated.input.dueDate;
+    body.dueTime = validated.input.dueTime ?? null;
+    body.notes = validated.input.notes ?? null;
+    body.url = validated.input.url ?? null;
+    body.timezone = validated.input.timezone ?? null;
+  }
+
+  const reminder = updateReminder(id, {
+    ...(body.title !== undefined ? { title: body.title } : {}),
+    ...(body.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
+    ...(body.dueTime !== undefined ? { dueTime: body.dueTime } : {}),
+    ...(body.notes !== undefined ? { notes: body.notes } : {}),
+    ...(body.url !== undefined ? { url: body.url } : {}),
+    ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+    ...(body.status !== undefined ? { status: body.status } : {}),
+  });
+  return c.json({ reminder });
+});
+
+app.delete("/api/reminders/:id", (c) => {
+  deleteReminder(c.req.param("id"));
+  return c.json({ ok: true });
+});
+
+app.get("/api/reminder-events/pending", (c) =>
+  c.json({ events: claimPendingNotifications() }),
+);
+
 /* ---------------------------- providers ----------------------------- */
 
 app.get("/api/providers", (c) =>
@@ -408,7 +553,7 @@ app.post("/api/providers/:id/test", async (c) => {
     const { text } = await generateText({
       model: resolved.model,
       prompt: "Reply with exactly: OK",
-      maxOutputTokens: 8,
+      maxOutputTokens: 512,
       temperature: 0,
       abortSignal: AbortSignal.timeout(25000),
     });
@@ -440,6 +585,7 @@ const EDITABLE_SETTINGS = new Set([
   "memory.autoExtract",
   "chat.maxSteps",
   "chat.autoTitle",
+  "notifications.enabled",
   "app.theme",
 ]);
 
@@ -483,14 +629,18 @@ app.get("/api/export", (c) => {
   const messages = getAllMessagesForExport();
   const memories = listMemories(100000);
   const settings = getAllSettings();
+  const reminders = listAllRemindersForExport();
+  const reminderEvents = listAllEventsForExport();
   return c.json(
     {
       format: "minimi-export",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       sessions,
       messages,
       memories,
+      reminders,
+      reminderEvents,
       settings,
     },
     200,
@@ -508,6 +658,8 @@ app.post("/api/import", async (c) => {
         messages?: Array<Record<string, unknown>>;
         settings?: Record<string, string>;
         memories?: Array<Record<string, unknown>>;
+        reminders?: Array<Record<string, unknown>>;
+        reminderEvents?: Array<Record<string, unknown>>;
       }
     | null;
   if (!body || body.format !== "minimi-export") {
@@ -517,6 +669,7 @@ app.post("/api/import", async (c) => {
   let importedSessions = 0;
   let importedMessages = 0;
   let importedMemories = 0;
+  let importedReminders = 0;
 
   const transaction = db.transaction(() => {
     for (const session of body.sessions ?? []) {
@@ -524,11 +677,13 @@ app.post("/api/import", async (c) => {
       if (!id) continue;
       db.prepare(
         `INSERT OR REPLACE INTO sessions
-          (id, title, pinned, archived, provider_id, model, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, title, title_locked, title_turn, pinned, archived, provider_id, model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         String(session.title ?? "Imported chat"),
+        session.titleLocked ? 1 : 0,
+        Number(session.titleTurn ?? 0),
         session.pinned ? 1 : 0,
         session.archived ? 1 : 0,
         (session.providerId as string | null) ?? null,
@@ -580,8 +735,60 @@ app.post("/api/import", async (c) => {
       if (!EDITABLE_SETTINGS.has(key)) continue;
       setSetting(key, String(value));
     }
+
+    for (const reminder of body.reminders ?? []) {
+      const id = String(reminder.id ?? "");
+      if (!id) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO reminders
+          (id, session_id, title, notes, url, due_date, due_time, timezone,
+           status, source_message_id, created_at, updated_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        (reminder.sessionId as string | null) ?? null,
+        String(reminder.title ?? "Imported reminder"),
+        (reminder.notes as string | null) ?? null,
+        (reminder.url as string | null) ?? null,
+        String(reminder.dueDate ?? ""),
+        (reminder.dueTime as string | null) ?? null,
+        (reminder.timezone as string | null) ?? null,
+        reminder.status === "done" ? "done" : "active",
+        (reminder.sourceMessageId as string | null) ?? null,
+        Number(reminder.createdAt ?? Date.now()),
+        Number(reminder.updatedAt ?? Date.now()),
+        reminder.completedAt ? Number(reminder.completedAt) : null,
+      );
+      importedReminders += 1;
+    }
+
+    for (const event of body.reminderEvents ?? []) {
+      const id = String(event.id ?? "");
+      const reminderId = String(event.reminderId ?? "");
+      if (!id || !reminderId) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO reminder_events
+          (id, reminder_id, kind, scheduled_for, status, fired_at, notified_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        reminderId,
+        String(event.kind ?? "day_hour"),
+        Number(event.scheduledFor ?? Date.now()),
+        String(event.status ?? "pending"),
+        event.firedAt ? Number(event.firedAt) : null,
+        event.notifiedAt ? Number(event.notifiedAt) : null,
+        Number(event.createdAt ?? Date.now()),
+      );
+    }
   });
   transaction();
+
+  for (const reminder of body.reminders ?? []) {
+    if (reminder.status !== "done" && reminder.id) {
+      syncReminderEvents(String(reminder.id));
+    }
+  }
 
   const existingMemory = db.prepare(
     "SELECT 1 FROM memories WHERE session_id = ? AND text = ? LIMIT 1",
@@ -611,6 +818,7 @@ app.post("/api/import", async (c) => {
     importedSessions,
     importedMessages,
     importedMemories,
+    importedReminders,
   });
 });
 
@@ -621,6 +829,8 @@ app.post("/api/data/clear", (c) => {
   }>;
   for (const file of files) removeStoredFile(file.path);
   const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM reminder_events").run();
+    db.prepare("DELETE FROM reminders").run();
     db.prepare("DELETE FROM vec_memories").run();
     db.prepare("DELETE FROM memories").run();
     db.prepare("DELETE FROM messages_fts").run();
@@ -641,6 +851,8 @@ if (fs.existsSync(distDir)) {
   app.get("*", serveStatic({ path: "./dist/index.html" }));
 }
 
+const stopReminderScheduler = startReminderScheduler();
+
 const server = serve(
   {
     fetch: app.fetch,
@@ -656,6 +868,7 @@ const server = serve(
 void warmEmbeddings();
 
 function shutdown(): void {
+  stopReminderScheduler();
   server.close();
   closeDb();
   process.exit(0);

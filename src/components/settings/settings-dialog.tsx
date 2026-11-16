@@ -45,6 +45,7 @@ import { ProviderBadge } from "@/components/provider-badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { api } from "@/lib/api";
 import { formatDate, formatRelative } from "@/lib/format";
+import { ensureNotificationPermission } from "@/lib/notifications";
 import type {
   EmbeddingStatus,
   MemoryRecord,
@@ -168,7 +169,7 @@ export function SettingsDialog({
     try {
       const result = await api.importData(pendingImport);
       toast.success(
-        `Imported ${result.importedSessions} conversations, ${result.importedMessages} messages and ${result.importedMemories ?? 0} memories.`,
+        `Imported ${result.importedSessions} conversations, ${result.importedMessages} messages, ${result.importedMemories ?? 0} memories and ${result.importedReminders ?? 0} reminders.`,
       );
       setPendingImport(null);
       await load();
@@ -479,7 +480,7 @@ export function SettingsDialog({
                       <div>
                         <div className="font-medium text-sm">Auto title</div>
                         <p className="text-muted-foreground text-xs">
-                          Name chats from the first message.
+                          Name chats automatically. Manual names stay fixed.
                         </p>
                       </div>
                       <Switch
@@ -494,6 +495,40 @@ export function SettingsDialog({
                     </div>
                   </div>
                 </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-xl border p-4">
+                  <div>
+                    <div className="font-medium text-sm">
+                      Desktop notifications
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Show system notifications when a reminder fires. The
+                      Notification drawer always updates.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings["notifications.enabled"] !== "0"}
+                    onCheckedChange={async (checked) => {
+                      if (checked) {
+                        const granted = await ensureNotificationPermission();
+                        if (!granted) {
+                          toast.error(
+                            "Notifications are blocked in this browser or system.",
+                          );
+                          return;
+                        }
+                      }
+                      setSettings((current) => ({
+                        ...current,
+                        "notifications.enabled": checked ? "1" : "0",
+                      }));
+                      void saveSetting(
+                        "notifications.enabled",
+                        checked ? "1" : "0",
+                      );
+                    }}
+                  />
+                </div>
               </TabsPanel>
 
               <TabsPanel value="data" className="space-y-3 px-6 pb-6">
@@ -503,8 +538,8 @@ export function SettingsDialog({
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-sm">Export</div>
                       <p className="text-muted-foreground text-xs">
-                        Download conversations, messages, memories, and provider
-                        metadata as JSON. API keys are never included.
+                        Download conversations, messages, memories, reminders,
+                        and provider metadata as JSON. API keys are never included.
                       </p>
                     </div>
                     <Button
@@ -557,8 +592,8 @@ export function SettingsDialog({
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-sm">Clear local data</div>
                       <p className="text-muted-foreground text-xs">
-                        Delete every conversation, message, memory, and uploaded
-                        file from this machine.
+                        Delete every conversation, message, memory, reminder, and
+                        uploaded file from this machine.
                       </p>
                     </div>
                     <Button
@@ -598,7 +633,7 @@ export function SettingsDialog({
         open={clearDataOpen}
         onOpenChange={setClearDataOpen}
         title="Delete all local data?"
-        description="This permanently removes every conversation, message, memory, and uploaded file. Export first if you want a backup."
+        description="This permanently removes every conversation, message, memory, reminder, and uploaded file. Export first if you want a backup."
         confirmLabel="Delete everything"
         destructive
         onConfirm={() => void clearData()}

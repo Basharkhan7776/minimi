@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { DB_PATH, ensureDataDirs } from "../config";
+import { envKeyForProvider } from "../provider-env";
 import { DEFAULT_PROVIDERS, SCHEMA_SQL } from "./schema";
 
 let db: Database.Database | null = null;
@@ -19,6 +20,7 @@ export function getDb(): Database.Database {
   }
   instance.exec(SCHEMA_SQL);
   migrate(instance);
+  repairProviderDefaults(instance);
   seedProviders(instance);
   setDefaultSettings(instance);
   db = instance;
@@ -26,12 +28,39 @@ export function getDb(): Database.Database {
 }
 
 function migrate(instance: Database.Database): void {
-  const columns = instance
+  const messageColumns = instance
     .prepare("PRAGMA table_info(messages)")
     .all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "metadata_json")) {
+  if (!messageColumns.some((column) => column.name === "metadata_json")) {
     instance.exec("ALTER TABLE messages ADD COLUMN metadata_json TEXT");
   }
+
+  const sessionColumns = instance
+    .prepare("PRAGMA table_info(sessions)")
+    .all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === "title_locked")) {
+    instance.exec(
+      "ALTER TABLE sessions ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+  if (!sessionColumns.some((column) => column.name === "title_turn")) {
+    instance.exec(
+      "ALTER TABLE sessions ADD COLUMN title_turn INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+}
+
+function repairProviderDefaults(instance: Database.Database): void {
+  instance
+    .prepare(
+      "UPDATE providers SET default_model = 'openrouter/free' WHERE id = 'openrouter' AND (default_model IS NULL OR default_model IN ('', 'free', 'openrouter'))",
+    )
+    .run();
+  instance
+    .prepare(
+      "UPDATE providers SET default_model = 'gemini-3.5-flash' WHERE id = 'google' AND (default_model IS NULL OR default_model IN ('', 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'))",
+    )
+    .run();
 }
 
 function seedProviders(instance: Database.Database): void {
@@ -49,9 +78,7 @@ function seedProviders(instance: Database.Database): void {
 
   const transaction = instance.transaction(() => {
     for (const provider of DEFAULT_PROVIDERS) {
-      const envKey = provider.envKey
-        ? (process.env[provider.envKey] ?? null)
-        : null;
+      const envKey = envKeyForProvider(provider.type) ?? null;
       const current = existing.get(provider.id) as
         | { api_key: string | null }
         | undefined;
@@ -83,6 +110,7 @@ function setDefaultSettings(instance: Database.Database): void {
     "memory.autoExtract": "1",
     "chat.maxSteps": "8",
     "chat.autoTitle": "1",
+    "notifications.enabled": "1",
     "app.theme": "system",
   };
   const insert = instance.prepare(

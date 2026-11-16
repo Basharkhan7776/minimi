@@ -3,6 +3,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
+import { envKeyForProvider } from "../provider-env";
 import { getProvider, getFirstUsableProvider } from "../db/providers";
 import type { ProviderConfig, Session } from "../db/types";
 
@@ -21,17 +22,7 @@ export function buildModel(
     throw new Error(`No model configured for provider "${provider.name}"`);
   }
 
-  const apiKey =
-    provider.apiKey ||
-    (provider.type === "openai"
-      ? process.env.OPENAI_API_KEY
-      : provider.type === "anthropic"
-        ? process.env.ANTHROPIC_API_KEY
-        : provider.type === "google"
-          ? process.env.GOOGLE_GENERATIVE_AI_API_KEY
-          : provider.type === "openrouter"
-            ? process.env.OPENROUTER_API_KEY
-            : undefined);
+  const apiKey = provider.apiKey || envKeyForProvider(provider.type);
 
   if (!apiKey && provider.type !== "ollama" && provider.type !== "custom") {
     throw new Error(

@@ -3,6 +3,8 @@ import type { UIMessage } from "ai";
 export interface Session {
   id: string;
   title: string;
+  titleLocked: boolean;
+  titleTurn: number;
   pinned: boolean;
   archived: boolean;
   providerId: string | null;
@@ -47,6 +49,37 @@ export interface FileRecord {
   path: string;
   extractedText: string | null;
   createdAt: number;
+}
+
+export interface Reminder {
+  id: string;
+  sessionId: string | null;
+  title: string;
+  notes: string | null;
+  url: string | null;
+  dueDate: string;
+  dueTime: string | null;
+  timezone: string | null;
+  status: "active" | "done";
+  sourceMessageId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  nextNudgeAt?: number | null;
+  eventCount?: number;
+}
+
+export interface ReminderEvent {
+  id: string;
+  reminderId: string;
+  kind: string;
+  scheduledFor: number;
+  status: "pending" | "fired" | "skipped" | "cancelled";
+  firedAt: number | null;
+  notifiedAt: number | null;
+  createdAt: number;
+  reminderTitle?: string;
+  sessionId?: string | null;
 }
 
 export interface MemoryRecord {
