@@ -17,6 +17,17 @@ const titleSchema = z.object({
     .describe("A concise 2-6 word title, no quotes, no trailing punctuation."),
 });
 
+function fallbackTitle(text: string): string {
+  const cleaned = text
+    .replace(/^(please\s+)?(can you\s+|could you\s+)?/i, "")
+    .replace(/^remind me to\s+/i, "")
+    .replace(/^remember to\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const first = cleaned.split(/[.!?\n]/)[0]?.trim() || "New chat";
+  return first.length > 52 ? `${first.slice(0, 49).trimEnd()}…` : first;
+}
+
 export async function maybeGenerateTitle(input: {
   model: LanguageModel;
   sessionId: string;
@@ -63,10 +74,22 @@ export async function maybeGenerateTitle(input: {
       .replace(/^["'“”]+|["'“”]+$/g, "")
       .replace(/[.?!:;]+$/g, "")
       .slice(0, 72);
-    if (!title) return;
+    if (!title) {
+      if (isFirstTitle) {
+        setAutoTitle(
+          input.sessionId,
+          fallbackTitle(input.userText),
+          userTurns,
+        );
+      }
+      return;
+    }
     if (!object.rename && !isFirstTitle) return;
     setAutoTitle(input.sessionId, title, userTurns);
   } catch (error) {
     console.error("[agent] title generation failed", error);
+    if (isFirstTitle) {
+      setAutoTitle(input.sessionId, fallbackTitle(input.userText), userTurns);
+    }
   }
 }

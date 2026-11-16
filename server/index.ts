@@ -56,7 +56,10 @@ import {
   syncReminderEvents,
   updateReminder,
 } from "./db/reminders";
-import { startReminderScheduler } from "./reminders/engine";
+import {
+  REMINDER_CLAIM_WINDOW_MS,
+  startReminderScheduler,
+} from "./reminders/engine";
 import { extractReminderForTurn } from "./reminders/extract";
 import { createReminderFromInput } from "./reminders/service";
 import { validateReminderInput } from "./reminders/schedule";
@@ -266,6 +269,14 @@ app.post("/api/chat", async (c) => {
       const assistantText = extractText(responseMessage.parts);
       if (!isAborted && assistantText) {
         void (async () => {
+          const titlePromise = maybeGenerateTitle({
+            model: resolved.model,
+            sessionId,
+            userText,
+            assistantText,
+          }).catch((error) => {
+            console.error("[chat] title generation failed", error);
+          });
           try {
             await extractMemoriesForTurn({
               model: resolved.model,
@@ -289,16 +300,7 @@ app.post("/api/chat", async (c) => {
               console.error("[chat] reminder extraction failed", error);
             }
           }
-          try {
-            await maybeGenerateTitle({
-              model: resolved.model,
-              sessionId,
-              userText,
-              assistantText,
-            });
-          } catch (error) {
-            console.error("[chat] title generation failed", error);
-          }
+          await titlePromise;
         })();
       }
     },
@@ -480,7 +482,13 @@ app.delete("/api/reminders/:id", async (c) => {
 });
 
 app.get("/api/reminder-events/pending", (c) =>
-  c.json({ events: claimPendingNotifications() }),
+  c.json({
+    events: claimPendingNotifications(
+      Date.now(),
+      20,
+      REMINDER_CLAIM_WINDOW_MS,
+    ),
+  }),
 );
 
 /* ---------------------------- providers ----------------------------- */

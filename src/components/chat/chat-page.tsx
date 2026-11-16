@@ -147,6 +147,7 @@ export function ChatPage({
       onSessionsChanged();
       setTimeout(onSessionsChanged, 2500);
       setTimeout(onSessionsChanged, 9000);
+      setTimeout(onSessionsChanged, 20000);
     },
     onError: (error) => {
       toast.error(error.message || "The model request failed.");
